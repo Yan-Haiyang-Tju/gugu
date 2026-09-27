@@ -183,6 +183,11 @@ pub fn set_widget_layer(hwnd: HWND, above_icons: bool) -> bool {
         if let Some((x, y, _, _)) = before {
             place_on_screen(hwnd, x, y);
         }
+        println!(
+            "[gugu] 层级切换 above_icons={above_icons} 目标={:?} 成功={ok} 窗口可见={}",
+            target.0,
+            IsWindowVisible(hwnd).as_bool()
+        );
         ok
     }
 }

@@ -202,6 +202,23 @@ pub fn toggle_panel(app: &AppHandle) {
     }
 }
 
+/// 重新按设置把窗口挂回它该在的层级（不碰位置）
+fn reapply_widget_layer(app: &AppHandle) {
+    let settings = app.state::<Store>().settings();
+    let layer = settings
+        .get("widgetLayer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("wallpaper");
+    if layer == "none" || panel_is_open(app) {
+        return; // 调试档位 / 操作模式，不动
+    }
+    if let Some(w) = widget(app) {
+        if let Ok(hwnd) = w.hwnd() {
+            win::set_widget_layer(hwnd, layer == "float");
+        }
+    }
+}
+
 /// 按设置与全屏状态决定小部件是否露面
 pub fn apply_widget_visibility(app: &AppHandle) {
     let Some(w) = widget(app) else { return };
@@ -216,6 +233,9 @@ pub fn apply_widget_visibility(app: &AppHandle) {
     let visible = w.is_visible().unwrap_or(true);
     if should_show && !visible {
         let _ = w.show();
+        // 隐藏状态下 SetParent 不会生效，所以显示之后必须补挂一次，
+        // 否则小部件会浮在桌面之上（盖住图标）而不是落在图标下方。
+        reapply_widget_layer(app);
     } else if !should_show && visible {
         let _ = w.hide();
     }
