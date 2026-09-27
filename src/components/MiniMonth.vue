@@ -36,10 +36,10 @@ const dotsFor = (d: Date): Task[] => (byDay.value.get(dayKey(d)) ?? []).slice(0,
         {
           out: cell.out,
           today: dayKey(cell.date) === todayKey,
-          sel: big && selected === dayKey(cell.date),
+          sel: selected === dayKey(cell.date),
         },
       ]"
-      @click="big && !cell.out && emit('pick', cell.date)"
+      @click="!cell.out && emit('pick', cell.date)"
     >
       <b>{{ cell.date.getDate() }}</b>
       <span v-if="dotsFor(cell.date).length" :class="big ? 'mo-dots' : 'mc-dots'">
@@ -74,6 +74,22 @@ const dotsFor = (d: Date): Task[] => (byDay.value.get(dayKey(d)) ?? []).slice(0,
   text-align: center;
   font-size: 13.5px;
   color: var(--text-1);
+  cursor: pointer;
+  border-radius: 9px;
+  transition: background 0.15s;
+}
+
+.mc-d:hover:not(.out):not(.today) {
+  background: var(--surface-2);
+}
+
+.mc-d.out {
+  cursor: default;
+}
+
+/* 选中的那天（迷你版也有，不然点了没反馈） */
+.mc-d.sel b {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 .mc-d b {
