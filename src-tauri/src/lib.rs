@@ -1,0 +1,504 @@
+//! 咕咕（GUGU）· 常驻桌面的日历任务小部件
+//!
+//! 两个窗口共用一套前端产物，按 `?window=widget|panel` 分流：
+//! - `widget` 钉在桌面壁纸层，常驻显示月历与今日任务，不抢焦点
+//! - `panel` 平时隐藏，双击 Ctrl 从屏幕中央唤出，用于查看与编辑
+
+mod db;
+mod remind;
+mod tray;
+mod win;
+
+use db::{Store, Task, TaskInput};
+use serde_json::json;
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
+
+pub const TIME_FMT: &str = "%Y-%m-%dT%H:%M:%S";
+
+// ============================================================
+//  时间与默认设置
+// ============================================================
+
+pub fn now_string() -> String {
+    chrono::Local::now().naive_local().format(TIME_FMT).to_string()
+}
+
+pub fn now_naive() -> chrono::NaiveDateTime {
+    chrono::Local::now().naive_local()
+}
+
+pub fn is_overdue(due_at: &str) -> bool {
+    chrono::NaiveDateTime::parse_from_str(due_at, TIME_FMT)
+        .map(|d| d < now_naive())
+        .unwrap_or(false)
+}
+
+pub fn default_settings() -> serde_json::Value {
+    json!({
+        "theme": "celadon",       // celadon 青瓷绿 | azure 天青蓝 | tangerine 蜜柑橘
+        "mode": "light",          // light | dark
+        "glassAlpha": 0.82,       // 玻璃面板透明度 0.50–0.95
+        "blur": true,             // 毛玻璃
+        "widgetVisible": true,
+        "pinDesktop": true,       // 钉在桌面壁纸层
+        "clickThrough": false,    // 鼠标穿透（穿透后只能用热键唤出面板）
+        "hotkeyEnabled": true,
+        "hotkeyWindowMs": 420,    // 双击 Ctrl 两次之间的间隔上限
+        "dnd": false,             // 免打扰
+        "defaultRemindOffsets": [10, 0],
+        "widgetX": -1,            // -1 表示尚未定位，按默认位置摆放
+        "widgetY": -1,
+        "widgetW": 300,
+        "widgetH": 560,
+        "autostart": false
+    })
+}
+
+// ============================================================
+//  窗口控制
+// ============================================================
+
+fn panel(app: &AppHandle) -> Option<WebviewWindow> {
+    app.get_webview_window("panel")
+}
+
+fn widget(app: &AppHandle) -> Option<WebviewWindow> {
+    app.get_webview_window("widget")
+}
+
+/// 唤出面板并聚焦，同时通知前端切到对应视图
+pub fn show_panel_with(app: &AppHandle, event: &str) {
+    if let Some(w) = panel(app) {
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = app.emit(event, ());
+    }
+}
+
+pub fn show_panel(app: &AppHandle) {
+    show_panel_with(app, "panel:show");
+}
+
+pub fn toggle_panel(app: &AppHandle) {
+    let Some(w) = panel(app) else { return };
+    if w.is_visible().unwrap_or(false) {
+        let _ = w.hide();
+    } else {
+        show_panel(app);
+    }
+}
+
+/// 按设置与全屏状态决定小部件是否露面
+pub fn apply_widget_visibility(app: &AppHandle) {
+    let Some(w) = widget(app) else { return };
+    let want = app
+        .state::<Store>()
+        .settings()
+        .get("widgetVisible")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    // 独占全屏 / 演示模式下让位，避免和游戏画面打架
+    let should_show = want && !win::is_fullscreen_app();
+    let visible = w.is_visible().unwrap_or(true);
+    if should_show && !visible {
+        let _ = w.show();
+    } else if !should_show && visible {
+        let _ = w.hide();
+    }
+}
+
+/// 把设置里与窗口相关的部分落到窗口上
+pub fn apply_settings(app: &AppHandle) {
+    let settings = app.state::<Store>().settings();
+
+    win::set_hotkey_enabled(
+        settings
+            .get("hotkeyEnabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+    );
+    win::set_hotkey_window(
+        settings
+            .get("hotkeyWindowMs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(420),
+    );
+
+    if let Some(w) = widget(app) {
+        if let Ok(hwnd) = w.hwnd() {
+            let pin = settings
+                .get("pinDesktop")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let click_through = settings
+                .get("clickThrough")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            if pin && !win::is_pinned(hwnd) {
+                // 钉扎会改变窗口坐标系，钉完按屏幕坐标重新摆一次
+                if let Some((x, y, _, _)) = win::screen_rect(hwnd) {
+                    if win::pin_to_desktop(hwnd) {
+                        win::place_on_screen(hwnd, x, y);
+                    }
+                }
+            } else if !pin && win::is_pinned(hwnd) {
+                win::unpin(hwnd);
+            }
+            win::apply_widget_styles(hwnd, click_through);
+        }
+    }
+
+    apply_widget_visibility(app);
+    tray::refresh_menu(app);
+}
+
+/// 启动时决定小部件位置：优先用记忆的位置，落到屏幕外则回到右上角
+fn restore_widget_position(app: &AppHandle) {
+    let Some(w) = widget(app) else { return };
+    let settings = app.state::<Store>().settings();
+    let x = settings.get("widgetX").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
+    let y = settings.get("widgetY").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
+    let cw = settings.get("widgetW").and_then(|v| v.as_i64()).unwrap_or(300) as i32;
+    let ch = settings.get("widgetH").and_then(|v| v.as_i64()).unwrap_or(560) as i32;
+
+    let on_screen = x >= 0
+        && y >= 0
+        && app.available_monitors().unwrap_or_default().iter().any(|m| {
+            let mp = m.position();
+            let ms = m.size();
+            // 左上角一小块落在某块屏幕内即视为有效，避免拔掉副屏后窗口消失
+            x + 48 > mp.x && x < mp.x + ms.width as i32 && y >= mp.y - 4 && y < mp.y + ms.height as i32
+        });
+
+    let (tx, ty) = if on_screen {
+        (x, y)
+    } else {
+        default_widget_position(app, cw, ch)
+    };
+    let _ = w.set_position(PhysicalPosition::new(tx, ty));
+}
+
+fn default_widget_position(app: &AppHandle, cw: i32, _ch: i32) -> (i32, i32) {
+    match app.primary_monitor() {
+        Ok(Some(m)) => {
+            let mp = m.position();
+            let ms = m.size();
+            (mp.x + ms.width as i32 - cw - 28, mp.y + 64)
+        }
+        _ => (1200, 80),
+    }
+}
+
+// ============================================================
+//  命令：任务
+// ============================================================
+
+#[tauri::command]
+fn list_tasks(store: tauri::State<'_, Store>) -> Result<Vec<Task>, String> {
+    store.list_tasks().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_task(
+    app: AppHandle,
+    store: tauri::State<'_, Store>,
+    task: TaskInput,
+) -> Result<Task, String> {
+    let saved = store.save_task(&task).map_err(|e| e.to_string())?;
+    let _ = app.emit("tasks:changed", ());
+    Ok(saved)
+}
+
+#[tauri::command]
+fn set_done(
+    app: AppHandle,
+    store: tauri::State<'_, Store>,
+    id: i64,
+    done: bool,
+) -> Result<(), String> {
+    store.set_done(id, done).map_err(|e| e.to_string())?;
+    let _ = app.emit("tasks:changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_task(app: AppHandle, store: tauri::State<'_, Store>, id: i64) -> Result<(), String> {
+    store.delete_task(id).map_err(|e| e.to_string())?;
+    let _ = app.emit("tasks:changed", ());
+    Ok(())
+}
+
+// ============================================================
+//  命令：设置与窗口
+// ============================================================
+
+#[tauri::command]
+fn get_settings(store: tauri::State<'_, Store>) -> serde_json::Value {
+    store.settings()
+}
+
+#[tauri::command]
+fn set_settings(
+    app: AppHandle,
+    store: tauri::State<'_, Store>,
+    patch: serde_json::Value,
+) -> serde_json::Value {
+    let merged = store.update_settings(&patch);
+    apply_settings(&app);
+    let _ = app.emit("settings:changed", merged.clone());
+    merged
+}
+
+#[tauri::command]
+fn show_panel_cmd(app: AppHandle) {
+    show_panel(&app);
+}
+
+/// 唤出面板并直接进入新建任务（小部件的「＋」按钮）
+#[tauri::command]
+fn show_panel_add(app: AppHandle) {
+    show_panel_with(&app, "panel:add");
+}
+
+/// 唤出面板并切到设置页
+#[tauri::command]
+fn show_panel_settings(app: AppHandle) {
+    show_panel_with(&app, "panel:settings");
+}
+
+#[tauri::command]
+fn hide_panel_cmd(app: AppHandle) {
+    if let Some(w) = panel(&app) {
+        let _ = w.hide();
+    }
+}
+
+#[tauri::command]
+fn toggle_panel_cmd(app: AppHandle) {
+    toggle_panel(&app);
+}
+
+#[tauri::command]
+fn focus_widget(app: AppHandle) {
+    if let Some(w) = widget(&app) {
+        let _ = w.set_focus();
+    }
+}
+
+/// 记住小部件的位置与尺寸（前端在窗口移动后调用）
+#[tauri::command]
+fn save_widget_pos(app: AppHandle, store: tauri::State<'_, Store>) {
+    let Some(w) = widget(&app) else { return };
+    let Ok(hwnd) = w.hwnd() else { return };
+    if let Some((x, y, cw, ch)) = win::screen_rect(hwnd) {
+        store.update_settings(&json!({
+            "widgetX": x, "widgetY": y, "widgetW": cw, "widgetH": ch
+        }));
+    }
+}
+
+/// 按屏幕坐标平移小部件。
+///
+/// 钉到壁纸层之后窗口变成了子窗口，系统的原生拖动不再生效，
+/// 所以由前端上报指针位移，这里统一换算成屏幕坐标再摆放——
+/// 无论钉没钉住都走同一条路径。
+#[tauri::command]
+fn nudge_widget(app: AppHandle, store: tauri::State<'_, Store>, dx: i32, dy: i32) {
+    let Some(w) = widget(&app) else { return };
+    let Ok(hwnd) = w.hwnd() else { return };
+    let Some((x, y, cw, _)) = win::screen_rect(hwnd) else {
+        return;
+    };
+
+    let mut nx = x + dx;
+    let mut ny = y + dy;
+
+    // 至少让窗口的一角留在屏幕内，避免拖丢
+    if let Ok(monitors) = app.available_monitors() {
+        if !monitors.is_empty() {
+            let min_x = monitors.iter().map(|m| m.position().x).min().unwrap_or(0);
+            let min_y = monitors.iter().map(|m| m.position().y).min().unwrap_or(0);
+            let max_x = monitors
+                .iter()
+                .map(|m| m.position().x + m.size().width as i32)
+                .max()
+                .unwrap_or(1920);
+            let max_y = monitors
+                .iter()
+                .map(|m| m.position().y + m.size().height as i32)
+                .max()
+                .unwrap_or(1080);
+            nx = nx.clamp(min_x - cw + 60, max_x - 60);
+            ny = ny.clamp(min_y, max_y - 40);
+        }
+    }
+
+    win::place_on_screen(hwnd, nx, ny);
+    store.update_settings(&json!({ "widgetX": nx, "widgetY": ny }));
+}
+
+#[tauri::command]
+fn reset_widget_pos(app: AppHandle, store: tauri::State<'_, Store>) {
+    let settings = store.settings();
+    let cw = settings.get("widgetW").and_then(|v| v.as_i64()).unwrap_or(300) as i32;
+    let ch = settings.get("widgetH").and_then(|v| v.as_i64()).unwrap_or(560) as i32;
+    let (x, y) = default_widget_position(&app, cw, ch);
+    if let Some(w) = widget(&app) {
+        let _ = w.set_position(PhysicalPosition::new(x, y));
+        if let Ok(hwnd) = w.hwnd() {
+            win::place_on_screen(hwnd, x, y);
+        }
+    }
+    store.update_settings(&json!({ "widgetX": x, "widgetY": y }));
+}
+
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, store: tauri::State<'_, Store>, on: bool) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    if on {
+        app.autolaunch().enable().map_err(|e| e.to_string())?;
+    } else {
+        app.autolaunch().disable().map_err(|e| e.to_string())?;
+    }
+    store.update_settings(&json!({ "autostart": on }));
+    Ok(on)
+}
+
+#[tauri::command]
+fn test_notification(app: AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title("咕咕 · 通知测试")
+        .body("看到这条说明提醒功能是通的 ✓")
+        .show();
+}
+
+/// 导出全部任务为 JSON 备份，返回文件路径
+#[tauri::command]
+fn export_data(app: AppHandle, store: tauri::State<'_, Store>) -> Result<String, String> {
+    let tasks = store.list_tasks().map_err(|e| e.to_string())?;
+    let payload = json!({
+        "app": "gugu",
+        "version": env!("CARGO_PKG_VERSION"),
+        "exportedAt": now_string(),
+        "tasks": tasks.iter().map(|t| t.to_json()).collect::<Vec<_>>(),
+    });
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let path = dir.join(format!("gugu-{stamp}.json"));
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_path(app: AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// 数据目录（数据库与备份都在这里）
+#[tauri::command]
+fn data_dir(app: AppHandle) -> String {
+    app.path()
+        .app_data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+// ============================================================
+//  启动
+// ============================================================
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        // 单实例必须第一个注册：重复启动时唤起已有实例的面板
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_panel(app);
+        }));
+    }
+
+    builder
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let handle = app.handle().clone();
+
+            let dir = app.path().app_data_dir()?;
+            let store = Store::open(&dir.join("gugu.db"))?;
+            app.manage(store);
+
+            restore_widget_position(&handle);
+            apply_settings(&handle);
+
+            tray::build(&handle)?;
+            win::install_hotkey(handle.clone());
+            remind::spawn(handle.clone());
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            list_tasks,
+            save_task,
+            set_done,
+            delete_task,
+            get_settings,
+            set_settings,
+            show_panel_cmd,
+            show_panel_add,
+            show_panel_settings,
+            hide_panel_cmd,
+            toggle_panel_cmd,
+            focus_widget,
+            save_widget_pos,
+            nudge_widget,
+            reset_widget_pos,
+            get_autostart,
+            set_autostart,
+            test_notification,
+            export_data,
+            open_path,
+            data_dir,
+            quit_app
+        ])
+        .build(tauri::generate_context!())
+        .expect("咕咕启动失败")
+        .run(|_app, event| {
+            // 关掉面板只是隐藏，程序继续驻留托盘
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+            }
+        });
+}

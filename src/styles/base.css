@@ -1,0 +1,241 @@
+/* =========================================================
+   GUGU 全局基座：窗口透明化、通用控件、滚动条
+   颜色全部走 tokens.css 的 CSS 变量，换主题不改此处
+   ========================================================= */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+  padding: 0;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  color: inherit;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+}
+
+/* 桌面系统级模糊由窗口的 acrylic 效果提供，这里只负责玻璃底色 */
+.win {
+  height: 100%;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  color: var(--text-1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 拖动区域：配合 data-tauri-drag-region 使用（Tauri 只认属性，不认 -webkit-app-region）。
+   子元素没有该属性，所以里面的按钮依然可以正常点击。 */
+.drag {
+  cursor: grab;
+}
+
+.drag:active {
+  cursor: grabbing;
+}
+
+/* ---------- 复选框 ---------- */
+.ck {
+  width: 16px;
+  height: 16px;
+  border-radius: 6px;
+  border: 1.5px solid var(--text-3);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: none;
+  transition: background 0.2s, border-color 0.2s;
+  background: transparent;
+}
+
+.ck svg {
+  width: 10px;
+  height: 9px;
+  stroke: var(--on-accent);
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 16;
+  stroke-dashoffset: 16;
+  transition: stroke-dashoffset 0.25s var(--ease-spring) 0.05s;
+}
+
+.ck:hover {
+  border-color: var(--accent);
+}
+
+.ck.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ck.on svg {
+  stroke-dashoffset: 0;
+}
+
+.ck.sm {
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+}
+
+.ck.sm svg {
+  width: 8px;
+  height: 7px;
+}
+
+/* ---------- 按钮 ---------- */
+.ghost {
+  color: var(--text-3);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ghost:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.btn {
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn.gho {
+  border: 1px solid var(--hairline);
+  color: var(--text-2);
+}
+
+.btn.gho:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+.btn.pri {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 500;
+}
+
+.btn.pri:hover {
+  background: var(--accent-deep);
+}
+
+.btn.danger {
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+.btn.danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.mini-btn {
+  font-size: 10.5px;
+  padding: 2.5px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--hairline);
+  color: var(--text-2);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.mini-btn:hover {
+  border-color: var(--text-3);
+  color: var(--text-1);
+}
+
+.mini-btn.ok {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+/* ---------- 标签胶囊 ---------- */
+.tagpill {
+  font-size: 10px;
+  padding: 1.5px 8px;
+  border-radius: 20px;
+  flex: none;
+  background: color-mix(in srgb, var(--tc) 15%, transparent);
+  color: color-mix(in srgb, var(--tc) 78%, var(--text-1) 22%);
+}
+
+.pill-over {
+  font-size: 10px;
+  padding: 1.5px 7px;
+  border-radius: 20px;
+  flex: none;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--hairline);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
+/* 由设置里的「毛玻璃」开关控制 */
+.no-blur .win {
+  backdrop-filter: none;
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "GUGU 双窗口基础能力",
+  "windows": ["widget", "panel"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-position",
+    "core:window:allow-start-dragging",
+    "core:window:allow-outer-position",
+    "core:window:allow-available-monitors",
+    "core:window:allow-scale-factor",
+    "core:window:allow-is-visible",
+    "opener:default",
+    "notification:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}

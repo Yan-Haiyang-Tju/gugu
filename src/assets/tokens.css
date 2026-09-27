@@ -1,0 +1,36 @@
+/* =========================================================
+   GUGU design tokens —— 正式版主题系统骨架（与 design/tokens.css 同源）
+   data-theme : celadon 青瓷绿 | azure 天青蓝 | tangerine 蜜柑橘
+   data-mode  : light | dark
+   --glass-alpha : 玻璃面板透明度（设置页滑块，0.50–0.95）
+   ========================================================= */
+:root{
+  --font-ui:"Segoe UI Variable Text","MiSans","HarmonyOS Sans SC","PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;
+  --r-lg:16px; --r-md:12px; --r-sm:8px;
+  --shadow-win:0 16px 48px rgba(12,18,24,.20),0 2px 8px rgba(12,18,24,.10);
+  --ease-spring:cubic-bezier(.34,1.56,.64,1);
+  --c-work:#5B8DBE; --c-study:#7A7FB5; --c-life:#C98A5B;
+  --c-health:#6FA383; --c-social:#C07A8A; --c-errand:#8A8F98;
+  --danger:#C4554D;
+}
+[data-theme="celadon"]{ --accent:#3E9B7A; --accent-deep:#2F7D62; --accent-weak:rgba(62,155,122,.14); --on-accent:#fff; }
+[data-theme="azure"]  { --accent:#4A90D9; --accent-deep:#3B78BA; --accent-weak:rgba(74,144,217,.13); --on-accent:#fff; }
+[data-theme="tangerine"]{ --accent:#E8956D; --accent-deep:#C9713F; --accent-weak:rgba(232,149,109,.16); --on-accent:#4A2410; }
+
+[data-mode="light"]{
+  --surface:rgba(252,251,249,var(--glass-alpha,.8));
+  --surface-2:rgba(255,255,255,.55);
+  --solid:#FAF9F6;
+  --text-1:#26282C; --text-2:#6D7278; --text-3:#A0A5AA;
+  --hairline:rgba(28,32,36,.08);
+  --edge:rgba(255,255,255,.55);
+}
+[data-mode="dark"]{
+  --surface:rgba(26,28,32,var(--glass-alpha,.8));
+  --surface-2:rgba(255,255,255,.05);
+  --solid:#1C1E22;
+  --text-1:#E9E7E2; --text-2:#A3A6AA; --text-3:#686C70;
+  --hairline:rgba(255,255,255,.09);
+  --edge:rgba(255,255,255,.10);
+  --danger:#D0705F;
+}
