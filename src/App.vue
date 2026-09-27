@@ -8,6 +8,9 @@ import { initStore, state } from "./lib/store";
 const isPanel = new URLSearchParams(location.search).get("window") === "panel";
 const bootError = ref<string | null>(null);
 
+// 让 tokens.css 能按窗口类型给不同的底色（小部件钉成子窗口后系统模糊会失效，需要更实的底）
+document.documentElement.dataset.win = isPanel ? "panel" : "widget";
+
 onMounted(async () => {
   try {
     await initStore();

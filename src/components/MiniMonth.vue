@@ -62,17 +62,17 @@ const dotsFor = (d: Date): Task[] => (byDay.value.get(dayKey(d)) ?? []).slice(0,
 }
 
 .mc-w {
-  font-size: 10.5px;
+  font-size: 11.5px;
   color: var(--text-3);
   text-align: center;
-  padding-bottom: 5px;
+  padding-bottom: 6px;
 }
 
 .mc-d {
-  height: 30px;
+  height: 35px;
   position: relative;
   text-align: center;
-  font-size: 12px;
+  font-size: 13.5px;
   color: var(--text-1);
 }
 
@@ -80,10 +80,10 @@ const dotsFor = (d: Date): Task[] => (byDay.value.get(dayKey(d)) ?? []).slice(0,
   font-weight: 400;
   display: inline-grid;
   place-items: center;
-  min-width: 22px;
-  height: 22px;
+  min-width: 27px;
+  height: 27px;
   padding: 0 3px;
-  border-radius: 11px;
+  border-radius: 14px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -105,12 +105,12 @@ const dotsFor = (d: Date): Task[] => (byDay.value.get(dayKey(d)) ?? []).slice(0,
   bottom: 1px;
   display: flex;
   justify-content: center;
-  gap: 2px;
+  gap: 2.5px;
 }
 
 .mc-dots i {
-  width: 3.5px;
-  height: 3.5px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: var(--tc);
 }

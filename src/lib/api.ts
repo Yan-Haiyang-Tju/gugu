@@ -89,6 +89,8 @@ export const api = {
 
   // ---- 设置 ----
   getSettings: () => invoke<Settings>("get_settings"),
+  /** 系统级磨砂是否可用（小部件钉成子窗口后，这个能力不一定有） */
+  blurActive: () => invoke<boolean>("blur_active"),
   setSettings: (patch: Partial<Settings>) => invoke<Settings>("set_settings", { patch }),
 
   // ---- 窗口 ----

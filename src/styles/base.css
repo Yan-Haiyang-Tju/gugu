@@ -49,17 +49,29 @@ textarea:focus {
   outline: none;
 }
 
-/* 桌面系统级模糊由窗口的 acrylic 效果提供，这里只负责玻璃底色 */
+/* 窗口基座。真正的背景模糊由系统提供（面板走 DWM 亚克力，小部件走非公开接口），
+   这里只负责玻璃底色——加一层极淡的竖向渐变，让实心底色也有"玻璃"的通透感。 */
 .win {
   height: 100%;
   border-radius: var(--r-lg);
-  background: var(--surface);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #fff calc(var(--glass-sheen, 7%) * 1), transparent) 0%,
+      transparent 42%
+    ),
+    var(--surface);
   border: 1px solid var(--edge);
   color: var(--text-1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   position: relative;
+}
+
+/* 深色下高光要更弱，否则像蒙了层灰 */
+[data-mode="dark"] .win {
+  --glass-sheen: 3%;
 }
 
 /* 拖动区域：配合 data-tauri-drag-region 使用（Tauri 只认属性，不认 -webkit-app-region）。

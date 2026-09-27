@@ -9,9 +9,9 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
 
 use tauri::AppHandle;
-use windows::core::PCWSTR;
+use windows::core::{PCSTR, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::UI::Shell::{
     SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE,
     QUNS_RUNNING_D3D_FULL_SCREEN,
@@ -109,60 +109,6 @@ fn worker_child_of(parent: HWND) -> Option<HWND> {
     }
 }
 
-/// 把窗口钉到桌面壁纸层。成功返回 true。
-pub fn pin_to_desktop(hwnd: HWND) -> bool {
-    let worker = find_worker_w();
-    if worker.is_invalid() {
-        eprintln!("[gugu] 未找到桌面壁纸层（WorkerW），退化为普通窗口");
-        return false;
-    }
-    unsafe {
-        // 关键：跨进程 SetParent 前必须先把窗口从 WS_POPUP 改成 WS_CHILD，
-        // 否则 Windows 会「返回成功但什么也不做」（本机 Win11 26200 实测如此）。
-        let old_style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        let child_style = (old_style & !WS_POPUP.0) | WS_CHILD.0;
-        SetWindowLongPtrW(hwnd, GWL_STYLE, child_style as isize);
-
-        let _ = SetParent(hwnd, Some(worker));
-        let _ = SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            0,
-            0,
-            SET_WINDOW_POS_FLAGS(
-                SWP_NOMOVE.0 | SWP_NOSIZE.0 | SWP_NOZORDER.0 | SWP_FRAMECHANGED.0,
-            ),
-        );
-
-        let parent = GetParent(hwnd).unwrap_or_default();
-        if parent == worker {
-            println!("[gugu] 已钉到桌面壁纸层（在图标下方）");
-            return true;
-        }
-
-        // 没挂上就还原样式，别把窗口留在半吊子状态
-        SetWindowLongPtrW(hwnd, GWL_STYLE, old_style as isize);
-        let _ = SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            0,
-            0,
-            SET_WINDOW_POS_FLAGS(
-                SWP_NOMOVE.0 | SWP_NOSIZE.0 | SWP_NOZORDER.0 | SWP_FRAMECHANGED.0,
-            ),
-        );
-        eprintln!(
-            "[gugu] 钉到桌面失败（期望父窗口 {:?}，实际 {:?}），已还原为普通窗口",
-            worker.0, parent.0
-        );
-        false
-    }
-}
-
 pub fn unpin(hwnd: HWND) -> bool {
     unsafe {
         if SetParent(hwnd, None).is_err() {
@@ -191,6 +137,140 @@ pub fn unpin(hwnd: HWND) -> bool {
 /// 窗口当前是否已被钉在桌面上
 pub fn is_pinned(hwnd: HWND) -> bool {
     unsafe { GetParent(hwnd).map(|p| !p.is_invalid()).unwrap_or(false) }
+}
+
+/// 切换小部件所在的层级：
+/// - `above_icons = false` → 挂在壁纸层 WorkerW 里，落在桌面图标**下方**（不挡桌面，但收不到点击）
+/// - `above_icons = true`  → 直接挂到 Progman 下并置顶，浮到图标**上方**（可点击可拖动，会盖住图标）
+///
+/// 面板打开时切到后者，关闭时切回前者——这样既能随时操作，平时又不占地方。
+pub fn set_widget_layer(hwnd: HWND, above_icons: bool) -> bool {
+    unsafe {
+        let desktop = GetShellWindow();
+        if desktop.is_invalid() {
+            return false;
+        }
+        let target = if above_icons {
+            desktop
+        } else {
+            let w = find_worker_w();
+            if w.is_invalid() {
+                eprintln!("[gugu] 未找到桌面壁纸层（WorkerW），小部件将留在普通窗口层");
+                return false;
+            }
+            w
+        };
+
+        // 换父窗口前后要按屏幕坐标重新摆一次（坐标系跟着父窗口变）
+        let before = screen_rect(hwnd);
+
+        // 跨进程 SetParent 前必须保证是 WS_CHILD，否则 Windows 静默忽略
+        let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        style = (style & !WS_POPUP.0) | WS_CHILD.0;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
+
+        let _ = SetParent(hwnd, Some(target));
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND::default()), // HWND_TOP：在同级里置顶
+            0,
+            0,
+            0,
+            0,
+            SET_WINDOW_POS_FLAGS(
+                SWP_NOMOVE.0 | SWP_NOSIZE.0 | SWP_FRAMECHANGED.0,
+            ),
+        );
+
+        let ok = GetParent(hwnd).unwrap_or_default() == target;
+        if let Some((x, y, _, _)) = before {
+            place_on_screen(hwnd, x, y);
+        }
+        ok
+    }
+}
+
+// ---------- 非公开 API：给窗口加系统级模糊 ----------
+// DWM 的 windowEffects（亚克力/云母）只对顶层窗口生效，小部件被挂成 explorer 的子窗口后
+// 就失效了。SetWindowCompositionAttribute 是 Win10 时代就存在的非公开接口，
+// 对子窗口依然有效，是这里唯一能拿到"真磨砂"的途径。
+
+#[repr(C)]
+struct AccentPolicy {
+    accent_state: u32,
+    accent_flags: u32,
+    /// ABGR：0xAABBGGRR
+    gradient_color: u32,
+    animation_id: u32,
+}
+
+#[repr(C)]
+struct WindowCompositionAttributeData {
+    attribute: u32,
+    data: *mut core::ffi::c_void,
+    size_of_data: usize,
+}
+
+const WCA_ACCENT_POLICY: u32 = 19;
+const ACCENT_DISABLED: u32 = 0;
+const ACCENT_ENABLE_ACRYLICBLURBEHIND: u32 = 4;
+
+type SetWcaFn = unsafe extern "system" fn(HWND, *mut WindowCompositionAttributeData) -> i32;
+
+/// 取 SetWindowCompositionAttribute 的地址并缓存。
+/// 它虽然由 user32.dll 导出，却不在 user32.lib 的导入表里，直接链接会 LNK2019，
+/// 只能运行时解析。取不到就返回 None，调用方安静降级成实心底色。
+fn set_wca() -> Option<SetWcaFn> {
+    static FN: OnceLock<Option<SetWcaFn>> = OnceLock::new();
+    *FN.get_or_init(|| unsafe {
+        const PROC: &[u8] = b"SetWindowCompositionAttribute\0";
+        let dll = wide("user32.dll");
+        let user32 = GetModuleHandleW(PCWSTR(dll.as_ptr())).ok()?;
+        let addr = GetProcAddress(user32, PCSTR::from_raw(PROC.as_ptr()))?;
+        Some(std::mem::transmute::<
+            unsafe extern "system" fn() -> isize,
+            SetWcaFn,
+        >(addr))
+    })
+}
+
+/// 给窗口加上（或去掉）系统级背景模糊。`dark` 决定薄雾的色调。
+pub fn enable_backdrop_blur(hwnd: HWND, on: bool, dark: bool) {
+    let Some(func) = set_wca() else {
+        return;
+    };
+    // 浅色用偏白的薄雾，深色压暗；最高字节的 alpha 决定磨砂浓淡。
+    // 取 0x99（6 成）是刻意的折中：即使这个非公开接口在某些机器上不生效，
+    // CSS 那层底色仍能把内容撑到可读。
+    let tint: u32 = if dark { 0x99_24_20_1E } else { 0x99_F3_F6_F7 };
+    let mut policy = AccentPolicy {
+        accent_state: if on { ACCENT_ENABLE_ACRYLICBLURBEHIND } else { ACCENT_DISABLED },
+        accent_flags: 0,
+        gradient_color: tint,
+        animation_id: 0,
+    };
+    let mut data = WindowCompositionAttributeData {
+        attribute: WCA_ACCENT_POLICY,
+        data: &mut policy as *mut _ as *mut core::ffi::c_void,
+        size_of_data: std::mem::size_of::<AccentPolicy>(),
+    };
+    let ok = unsafe { func(hwnd, &mut data) } != 0;
+    BLUR_OK.store(on && ok, Ordering::Relaxed);
+
+    // 这个接口是未公开的，不同 Windows 版本表现不一，失败时打个日志便于定位
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+    if !ok && !REPORTED.swap(true, Ordering::Relaxed) {
+        eprintln!("[gugu] 系统磨砂不可用，小部件回退为实心底色");
+    }
+}
+
+static BLUR_OK: AtomicBool = AtomicBool::new(false);
+
+/// 系统磨砂当前是否真的生效。
+/// 前端据此决定小部件用半透明还是实心底色——拿不到磨砂还做半透明的话，
+/// 桌面图标会清晰地透上来，正是要避免的情况。
+pub fn backdrop_blur_available() -> bool {
+    BLUR_OK.load(Ordering::Relaxed)
 }
 
 /// 加上「不抢焦点 + 不出现在 Alt+Tab」的扩展样式；可选鼠标穿透。

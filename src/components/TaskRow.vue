@@ -43,10 +43,10 @@ const cat = computed(() => categoryOf(props.task.category));
 .row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5.5px 6px;
-  border-radius: 8px;
-  font-size: 12.5px;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  font-size: 13.5px;
   transition: background 0.15s;
 }
 
@@ -55,10 +55,10 @@ const cat = computed(() => categoryOf(props.task.category));
 }
 
 .time {
-  width: 34px;
+  width: 39px;
   flex: none;
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -72,8 +72,8 @@ const cat = computed(() => categoryOf(props.task.category));
 
 .pri {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   display: grid;
   place-items: center;

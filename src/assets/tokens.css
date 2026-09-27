@@ -18,7 +18,8 @@
 [data-theme="tangerine"]{ --accent:#E8956D; --accent-deep:#C9713F; --accent-weak:rgba(232,149,109,.16); --on-accent:#4A2410; }
 
 [data-mode="light"]{
-  --surface:rgba(252,251,249,var(--glass-alpha,.8));
+  /* --win-alpha 由窗口类型决定：面板走用户滑块（玻璃感），小部件走固定高不透明度 */
+  --surface:rgba(252,251,249,var(--win-alpha,var(--glass-alpha,.8)));
   --surface-2:rgba(255,255,255,.55);
   --solid:#FAF9F6;
   --text-1:#26282C; --text-2:#6D7278; --text-3:#A0A5AA;
@@ -26,11 +27,37 @@
   --edge:rgba(255,255,255,.55);
 }
 [data-mode="dark"]{
-  --surface:rgba(26,28,32,var(--glass-alpha,.8));
+  --surface:rgba(26,28,32,var(--win-alpha,var(--glass-alpha,.8)));
   --surface-2:rgba(255,255,255,.05);
   --solid:#1C1E22;
   --text-1:#E9E7E2; --text-2:#A3A6AA; --text-3:#686C70;
   --hairline:rgba(255,255,255,.09);
   --edge:rgba(255,255,255,.10);
   --danger:#D0705F;
+}
+
+/* =========================================================
+   桌面小部件的底色纠正
+   小部件被钉成 explorer 的子窗口，DWM 的背景模糊/亚克力只对顶层窗口生效，
+   对它一律无效——也就是说窗口后面没有任何"磨砂"，桌面图标会原样透上来。
+   实测 0.82 的底色配上 0.55 的次级底色，任务行会和图标文字糊在一起。
+   所以这里把两级底色都提到接近不透明；玻璃的观感交给
+   Win32 的 SetWindowCompositionAttribute 去补（见 win.rs）。
+   ========================================================= */
+[data-win="widget"]{
+  --win-alpha:.955;
+  --surface-2:rgba(244,243,240,.90);
+  --hairline:rgba(28,32,36,.10);
+}
+/* 开了毛玻璃：系统磨砂负责背景，CSS 这层就薄一点让磨砂透出来；
+   万一 SetWindowCompositionAttribute 没生效，0.70 也还不至于糊成一片。 */
+[data-win="widget"][data-blur="on"]{
+  --win-alpha:.70;
+  --surface-2:rgba(255,255,255,.62);
+}
+[data-win="widget"][data-mode="dark"]{
+  --surface-2:rgba(52,55,60,.90);
+}
+[data-win="widget"][data-mode="dark"][data-blur="on"]{
+  --surface-2:rgba(60,64,70,.62);
 }

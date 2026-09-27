@@ -13,10 +13,18 @@ export const state = reactive({
   now: new Date(),
 });
 
+/**
+ * 系统磨砂是否真的生效。小部件被钉成 explorer 的子窗口后，
+ * 只有非公开接口 SetWindowCompositionAttribute 能给它加模糊，而它在部分机器上会失败。
+ * 失败时绝不能用半透明底色——那样桌面图标会清晰地透上来，字都看不清。
+ */
+let systemBlur = false;
+
 export function applyTheme(s: Settings) {
   const root = document.documentElement;
   root.dataset.theme = s.theme;
   root.dataset.mode = s.mode;
+  root.dataset.blur = s.blur && systemBlur ? "on" : "off";
   root.style.setProperty("--glass-alpha", String(s.glassAlpha));
   root.classList.toggle("no-blur", !s.blur);
 }
@@ -29,6 +37,11 @@ export async function initStore() {
   const [tasks, settings] = await Promise.all([api.listTasks(), api.getSettings()]);
   state.tasks = tasks;
   state.settings = settings;
+  try {
+    systemBlur = await api.blurActive();
+  } catch {
+    systemBlur = false;
+  }
   applyTheme(settings);
   state.ready = true;
 
@@ -84,6 +97,14 @@ export async function postpone(task: Task) {
 
 export async function patchSettings(patch: Partial<Settings>) {
   state.settings = await api.setSettings(patch);
+  // 开关毛玻璃会让后端重新尝试加系统磨砂，结果可能变，所以要重新问一次
+  if ("blur" in patch) {
+    try {
+      systemBlur = await api.blurActive();
+    } catch {
+      /* 保持原值 */
+    }
+  }
   applyTheme(state.settings);
 }
 

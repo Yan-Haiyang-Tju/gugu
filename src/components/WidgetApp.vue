@@ -127,7 +127,7 @@ function startDrag(e: PointerEvent) {
 
 <style scoped>
 .widget {
-  padding: 14px 14px 8px;
+  padding: 16px 16px 10px;
   gap: 0;
 }
 
@@ -135,13 +135,13 @@ function startDrag(e: PointerEvent) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   padding: 2px 2px 0;
 }
 
 .brand {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: 0.5px;
   display: flex;
   align-items: center;
@@ -160,13 +160,13 @@ function startDrag(e: PointerEvent) {
   display: flex;
   align-items: center;
   gap: 2px;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-2);
 }
 
 .w-nav b {
   font-weight: 500;
-  min-width: 68px;
+  min-width: 72px;
   text-align: center;
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
@@ -175,15 +175,15 @@ function startDrag(e: PointerEvent) {
 .w-div {
   height: 1px;
   background: var(--hairline);
-  margin: 10px -14px;
+  margin: 12px -16px;
 }
 
 .w-today-head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 12.5px;
-  padding: 0 2px 6px;
+  font-size: 13.5px;
+  padding: 0 2px 8px;
 }
 
 .w-today-head b {
@@ -192,7 +192,7 @@ function startDrag(e: PointerEvent) {
 
 .w-count {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -210,35 +210,33 @@ function startDrag(e: PointerEvent) {
 
 .w-day {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-3);
-  padding: 6px 6px 0;
+  padding: 8px 8px 0;
 }
 
 .w-empty {
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--text-3);
-  padding: 10px 6px;
+  padding: 12px 8px;
 }
 
 .w-foot {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 0 2px;
   border-top: 1px solid var(--hairline);
-  margin: 6px -14px 0;
-  padding-left: 14px;
-  padding-right: 12px;
-  font-size: 10.5px;
+  margin: 8px -16px 0;
+  padding: 8px 14px 2px 16px;
+  font-size: 11.5px;
   color: var(--text-3);
 }
 
 .w-add {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--accent-deep);
-  padding: 2px 6px;
-  border-radius: 6px;
+  padding: 3px 7px;
+  border-radius: 7px;
   transition: background 0.15s;
 }
 

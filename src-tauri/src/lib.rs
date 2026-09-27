@@ -66,13 +66,42 @@ fn widget(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window("widget")
 }
 
+/// 切换小部件的可交互状态。
+///
+/// 平时小部件落在桌面图标下方（不挡桌面，但收不到鼠标点击）；
+/// 面板打开期间把它抬到图标上方，这样拖动、点日期都能用。
+fn set_widget_interactive(app: &AppHandle, on: bool) {
+    let pinned = app
+        .state::<Store>()
+        .settings()
+        .get("pinDesktop")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if !pinned {
+        return; // 没钉住时本来就是普通窗口，一直可交互
+    }
+    if let Some(w) = widget(app) {
+        if let Ok(hwnd) = w.hwnd() {
+            win::set_widget_layer(hwnd, on);
+        }
+    }
+}
+
 /// 唤出面板并聚焦，同时通知前端切到对应视图
 pub fn show_panel_with(app: &AppHandle, event: &str) {
+    set_widget_interactive(app, true);
     if let Some(w) = panel(app) {
         let _ = w.show();
         let _ = w.set_focus();
         let _ = app.emit(event, ());
     }
+}
+
+pub fn hide_panel(app: &AppHandle) {
+    if let Some(w) = panel(app) {
+        let _ = w.hide();
+    }
+    set_widget_interactive(app, false);
 }
 
 pub fn show_panel(app: &AppHandle) {
@@ -82,7 +111,7 @@ pub fn show_panel(app: &AppHandle) {
 pub fn toggle_panel(app: &AppHandle) {
     let Some(w) = panel(app) else { return };
     if w.is_visible().unwrap_or(false) {
-        let _ = w.hide();
+        hide_panel(app);
     } else {
         show_panel(app);
     }
@@ -134,17 +163,23 @@ pub fn apply_settings(app: &AppHandle) {
                 .get("clickThrough")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let blur = settings.get("blur").and_then(|v| v.as_bool()).unwrap_or(true);
+            let dark = settings.get("mode").and_then(|v| v.as_str()) == Some("dark");
 
-            if pin && !win::is_pinned(hwnd) {
-                // 钉扎会改变窗口坐标系，钉完按屏幕坐标重新摆一次
-                if let Some((x, y, _, _)) = win::screen_rect(hwnd) {
-                    if win::pin_to_desktop(hwnd) {
-                        win::place_on_screen(hwnd, x, y);
-                    }
+            if pin {
+                // 面板开着的时候别把它按回图标下方，否则用户正操作到一半就点不动了
+                let panel_open = panel(app)
+                    .map(|p| p.is_visible().unwrap_or(false))
+                    .unwrap_or(false);
+                if !panel_open {
+                    win::set_widget_layer(hwnd, false);
                 }
-            } else if !pin && win::is_pinned(hwnd) {
+            } else if win::is_pinned(hwnd) {
                 win::unpin(hwnd);
             }
+
+            // DWM 的亚克力对子窗口无效，小部件的磨砂走非公开接口自己加
+            win::enable_backdrop_blur(hwnd, blur && pin, dark);
             win::apply_widget_styles(hwnd, click_through);
         }
     }
@@ -238,6 +273,12 @@ fn get_settings(store: tauri::State<'_, Store>) -> serde_json::Value {
     store.settings()
 }
 
+/// 系统级磨砂当前是否可用（不可用时前端会把小部件画成实心卡片）
+#[tauri::command]
+fn blur_active() -> bool {
+    win::backdrop_blur_available()
+}
+
 #[tauri::command]
 fn set_settings(
     app: AppHandle,
@@ -269,9 +310,7 @@ fn show_panel_settings(app: AppHandle) {
 
 #[tauri::command]
 fn hide_panel_cmd(app: AppHandle) {
-    if let Some(w) = panel(&app) {
-        let _ = w.hide();
-    }
+    hide_panel(&app);
 }
 
 #[tauri::command]
@@ -475,6 +514,7 @@ pub fn run() {
             set_done,
             delete_task,
             get_settings,
+            blur_active,
             set_settings,
             show_panel_cmd,
             show_panel_add,

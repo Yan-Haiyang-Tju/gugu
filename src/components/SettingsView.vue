@@ -84,7 +84,7 @@ async function doExport() {
           :checked="s.blur"
           @change="patchSettings({ blur: ($event.target as HTMLInputElement).checked })"
         />
-        <span class="tip">关闭后用小部件本身的半透明底色，低配机器更流畅</span>
+        <span class="tip">开启后小部件走系统磨砂（能透出模糊的桌面）；关掉是干净实心卡片，文字更清晰</span>
       </div>
     </section>
 
