@@ -283,31 +283,48 @@ pub fn detach_and_raise(hwnd: HWND) {
         // 所以这里必须把屏幕坐标显式写回去，不能图省事用 SWP_NOMOVE。
         // 用 HWND_TOP 而不是 HWND_TOPMOST：抬到「当前画面之上」就够了，
         // 仍留在普通窗口层里，用户打开别的应用时能正常把它盖住。
-        let _ = SetWindowPos(
+        if let Err(e) = SetWindowPos(
             hwnd,
-            Some(HWND::default()), // HWND_TOP
+            Some(HWND::default()), // 先只调位置，层级稍后统一处理
             x,
             y,
             w,
             h,
             SET_WINDOW_POS_FLAGS(SWP_FRAMECHANGED.0 | SWP_SHOWWINDOW.0),
+        ) {
+            eprintln!("[gugu] 摆放小部件失败：{e}");
+        }
+        force_to_front(hwnd);
+    }
+}
+
+/// 抬到「当前画面之上」，但保持普通窗口身份。
+///
+/// 只调 `SetWindowPos(HWND_TOP)` 是不够的：从后台进程调用时它压不过当前前台窗口
+/// （实测窗口抬完仍排在前台应用之下，用户看不到）。经典做法是先置顶、再立刻退回
+/// 普通层——两次调用之后窗口落在普通窗口带的最前面，既盖住了当前画面，
+/// 又没有变成永久置顶，用户打开别的应用时照样能正常盖住它。
+pub fn force_to_front(hwnd: HWND) {
+    const HWND_TOPMOST: isize = -1;
+    const HWND_NOTOPMOST: isize = -2;
+    unsafe {
+        let flags = SET_WINDOW_POS_FLAGS(SWP_NOMOVE.0 | SWP_NOSIZE.0);
+        let _ = SetWindowPos(hwnd, Some(HWND(HWND_TOPMOST as *mut _)), 0, 0, 0, 0, flags);
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND(HWND_NOTOPMOST as *mut _)),
+            0,
+            0,
+            0,
+            0,
+            flags,
         );
     }
 }
 
 /// 把普通窗口抬到同层的最前面（不改变置顶状态）
 pub fn raise_window(hwnd: HWND) {
-    unsafe {
-        let _ = SetWindowPos(
-            hwnd,
-            Some(HWND::default()), // HWND_TOP
-            0,
-            0,
-            0,
-            0,
-            SET_WINDOW_POS_FLAGS(SWP_NOMOVE.0 | SWP_NOSIZE.0),
-        );
-    }
+    force_to_front(hwnd);
 }
 
 /// 该窗口是不是当前的前台窗口（用来判断「已经在最前面」还是「被盖住了」）
