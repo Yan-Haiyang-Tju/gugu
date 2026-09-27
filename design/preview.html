@@ -223,6 +223,39 @@ body.no-blur{--glass-alpha:.97}
 .ml-empty{font-size:11.5px;color:var(--text-3);padding:8px 9px}
 
 body.noanim *{animation:none!important;transition:none!important}
+body{color-scheme:light}
+[data-mode="dark"]{color-scheme:dark}
+/* ---------- 新建任务小窗 ---------- */
+.pop-mask{position:absolute;inset:0;z-index:6;border-radius:var(--r-lg);
+  background:rgba(15,18,22,.28);display:none;align-items:flex-start;justify-content:center;padding-top:76px}
+.pop-mask.on{display:flex}
+.addpop{width:calc(100% - 32px);background:var(--solid);border:1px solid var(--hairline);
+  border-radius:var(--r-md);box-shadow:0 18px 44px rgba(10,14,20,.22);padding:12px 14px 11px;
+  animation:popin .18s cubic-bezier(.22,.9,.36,1) both}
+@keyframes popin{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
+.f-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}
+.f-head b{font-size:12.5px}
+.frow{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.f-label{font-size:11.5px;color:var(--text-2);width:30px;flex:none}
+.f-in{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--hairline);border-radius:8px;
+  padding:6px 9px;font-size:12.5px;color:var(--text-1);outline:none;transition:border-color .15s}
+.f-in:focus{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
+.f-in.time{flex:0 0 118px}
+.f-in.sel{flex:0 0 128px}
+.fdots{display:flex;gap:4px;flex-wrap:wrap}
+.fdot{display:flex;align-items:center;gap:4px;font-size:10.5px;padding:2.5px 8px;border-radius:14px;
+  border:1px solid transparent;color:var(--text-2);transition:.15s}
+.fdot i{width:8px;height:8px;border-radius:50%;background:var(--tc)}
+.fdot.on{background:color-mix(in srgb,var(--tc) 15%,transparent);
+  border-color:color-mix(in srgb,var(--tc) 40%,transparent);
+  color:color-mix(in srgb,var(--tc) 70%,var(--text-1) 30%)}
+.f-foot{display:flex;justify-content:space-between;align-items:center;margin-top:9px}
+.f-hint{font-size:10.5px;color:var(--text-3)}
+.btn{font-size:12px;padding:6px 14px;border-radius:8px}
+.btn.gho{border:1px solid var(--hairline);color:var(--text-2)}
+.btn.gho:hover{color:var(--text-1);border-color:var(--text-3)}
+.btn.pri{background:var(--accent);color:var(--on-accent);font-weight:500}
+.btn.pri:hover{background:var(--accent-deep)}
 @media (max-width:1180px){
   .stage{height:auto;min-width:0;display:flex;flex-wrap:wrap;gap:24px;justify-content:center;padding:90px 16px 40px}
   .win{position:static}
@@ -291,6 +324,28 @@ body.noanim *{animation:none!important;transition:none!important}
       <div class="view view-month" id="viewMonth"><div class="month-grid" id="monthGrid"></div><div class="month-list" id="monthList"></div></div>
     </div>
     <footer class="p-foot"><span id="pFootL"></span><span>双击 Ctrl 呼出 · Esc 收起</span></footer>
+
+    <!-- 新建任务小窗 -->
+    <div class="pop-mask" id="popMask">
+      <div class="addpop" role="dialog" aria-label="新建任务">
+        <div class="f-head"><b>新建任务</b><button class="ghost" id="popClose" title="关闭">×</button></div>
+        <div class="frow"><label class="f-label">任务</label><input class="f-in" id="fTitle" placeholder="要做什么？"></div>
+        <div class="frow"><label class="f-label">截止</label>
+          <select class="f-in sel" id="fDate"><option>今天</option><option>明天</option><option>后天</option><option>下周一</option></select>
+          <input class="f-in time" id="fTime" type="time" value="16:30">
+        </div>
+        <div class="frow"><label class="f-label">标签</label><div class="fdots" id="fDots"></div></div>
+        <div class="frow"><label class="f-label">提醒</label>
+          <select class="f-in sel" id="fRemind" style="flex:1"><option>提前 10 分钟</option><option>准点</option><option>提前 30 分钟</option><option>提前 1 小时</option><option>不提醒</option></select>
+        </div>
+        <div class="f-foot"><span class="f-hint">回车添加 · Esc 取消</span>
+          <span style="display:flex;gap:8px">
+            <button class="btn gho" id="popCancel">取消</button>
+            <button class="btn pri" id="popOk">＋ 添加</button>
+          </span>
+        </div>
+      </div>
+    </div>
   </section>
 
 </main>
@@ -533,26 +588,60 @@ inp.addEventListener("input",()=>renderChips(parseQuick(inp.value)));
 inp.addEventListener("keydown",e=>{
   if(e.key!=="Enter")return;
   const p=parseQuick(inp.value);
-  if(!p.title&&!p.tags.length)return;
-  const todayOnly=!p.date||p.date==="今天";
-  let h,m;
-  if(p.time){[h,m]=p.time.split(":").map(Number);}
-  else{h=Math.min(22,Math.floor(NOWH)+1);m=0;}
-  if(todayOnly){
-    const t=T({h,m,title:p.title||"新任务",tag:TAGS[p.tags[0]]?p.tags[0]:"errand",done:false});
+  if(!p.title&&!p.tags.length&&!p.time)return;
+  openPop({title:p.title, date:p.date, time:p.time, tag:p.tags[0]});
+});
+
+/* ---------- 新建任务小窗 ---------- */
+let popTag="errand";
+const FDOTS=[["work","工作"],["study","学习"],["life","生活"],["health","健康"],["social","社交"],["errand","杂务"]];
+function buildDots(){
+  $("#fDots").innerHTML=FDOTS.map(([k,l])=>
+    `<button class="fdot${k===popTag?" on":""}" data-k="${k}"><i style="--tc:${TAGS[k].c}"></i>${l}</button>`).join("");
+}
+$("#fDots").addEventListener("click",e=>{
+  const b=e.target.closest(".fdot"); if(!b)return; popTag=b.dataset.k; buildDots();
+});
+function defaultTime(){return `${pad(Math.min(22,Math.floor(NOWH)+1))}:00`;}
+function openPop(p={}){
+  $("#popMask").classList.add("on");
+  $("#fTitle").value=p.title||"";
+  $("#fDate").value=["今天","明天","后天","下周一"].includes(p.date)?p.date:"今天";
+  $("#fTime").value=p.time||defaultTime();
+  popTag=p.tag&&TAGS[p.tag]?p.tag:"errand";
+  buildDots();
+  setTimeout(()=>$("#fTitle").focus(),40);
+}
+function closePop(){$("#popMask").classList.remove("on");}
+function submitPop(){
+  const title=$("#fTitle").value.trim();
+  if(!title){$("#fTitle").focus();return;}
+  const [h,m]=($("#fTime").value||defaultTime()).split(":").map(Number);
+  const date=$("#fDate").value, remind=$("#fRemind").value;
+  if(date==="今天"){
+    const t=T({h,m,title,tag:popTag,done:false,remind:remind!=="不提醒"});
     TASKS.push(t);
     const rows=$$(".t-row");
-    const el=rowEl(t);
     const next=rows.find(r=>{
       const ot=TASKS.find(x=>x.id==r.dataset.id); return ot&&(ot.h+ot.m/60)>(t.h+t.m/60);
     });
-    $("#timeline").insertBefore(el,next||$("#nowline"));
+    $("#timeline").insertBefore(rowEl(t),next||$("#nowline"));
     refreshCounts(); placeNow();
   }else{
-    $("#chips").innerHTML=`<span class="chip ok">已加入「${p.date}」</span>`;
+    $("#chips").innerHTML=`<span class="chip ok">已加入「${date}」</span>`;
   }
-  inp.value="";
+  closePop(); inp.value=""; renderChips(null);
+}
+$("#popOk").addEventListener("click",submitPop);
+$("#popCancel").addEventListener("click",closePop);
+$("#popClose").addEventListener("click",closePop);
+$("#popMask").addEventListener("click",e=>{if(e.target===e.currentTarget)closePop();});
+$("#fTitle").addEventListener("keydown",e=>{if(e.key==="Enter")submitPop();});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"&&$("#popMask").classList.contains("on")){e.stopPropagation();closePop();}
 });
+$(".q-plus").addEventListener("click",()=>openPop());
+if(q.get("dialog"))openPop({title:"交周报",date:"今天",time:"16:30",tag:"work"});
 
 /* ---------- 交互：主题 / 深浅 / 透明度 / 毛玻璃 ---------- */
 $("#themePills").addEventListener("click",e=>{
