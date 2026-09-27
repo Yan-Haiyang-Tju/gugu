@@ -116,10 +116,52 @@ fn panel_is_open(app: &AppHandle) -> bool {
 }
 
 /// 唤出面板并聚焦，同时通知前端切到对应视图
+/// 面板默认居中，但如果那块位置正好压着小部件，小部件就白升起来（被面板盖住）。
+/// 这里检测重叠并让面板挪到小部件旁边，两边都能看见。
+fn place_panel_avoiding_widget(app: &AppHandle) {
+    let (Some(p), Some(w)) = (panel(app), widget(app)) else {
+        return;
+    };
+    let (Ok(panel_hwnd), Ok(widget_hwnd)) = (p.hwnd(), w.hwnd()) else {
+        return;
+    };
+    let (Some((px, py, pw, ph)), Some((wx, wy, ww, wht))) = (
+        win::screen_rect(panel_hwnd),
+        win::screen_rect(widget_hwnd),
+    ) else {
+        return;
+    };
+
+    let overlap = px < wx + ww && wx < px + pw && py < wy + wht && wy < py + ph;
+    if !overlap {
+        return; // 不冲突就别动，保持居中
+    }
+
+    let Ok(Some(mon)) = app.primary_monitor() else {
+        return;
+    };
+    let mx = mon.position().x;
+    let my = mon.position().y;
+    let mw = mon.size().width as i32;
+    let mh = mon.size().height as i32;
+
+    const GAP: i32 = 24;
+    let new_x = if wx - mx >= pw + GAP {
+        wx - GAP - pw // 放小部件左边
+    } else if (mx + mw) - (wx + ww) >= pw + GAP {
+        wx + ww + GAP // 放小部件右边
+    } else {
+        mx + (mw - pw) / 2 // 两边都放不下，只能居中重叠
+    };
+    let new_y = my + ((mh - ph) / 2).max(0);
+    win::place_on_screen(panel_hwnd, new_x, new_y);
+}
+
 pub fn show_panel_with(app: &AppHandle, event: &str) {
     set_operate_mode(app, true);
     if let Some(w) = panel(app) {
         let _ = w.show();
+        place_panel_avoiding_widget(app);
         // 小部件刚被抬到同层最前，面板要再抬一次才在它之上（两者都是普通窗口层）
         if let Ok(hwnd) = w.hwnd() {
             win::raise_window(hwnd);
