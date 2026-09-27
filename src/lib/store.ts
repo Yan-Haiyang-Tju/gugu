@@ -3,7 +3,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { reactive } from "vue";
 import { api, type Settings, type Task, type TaskInput } from "./api";
-import { addDays, dayKey, fromStamp, toStamp } from "./time";
+import { addDays, dayKey, fromStamp, startOfDay, toStamp } from "./time";
 
 export const state = reactive({
   tasks: [] as Task[],
@@ -145,6 +145,34 @@ export function upcoming(now = state.now, n = 6): Task[] {
       return ao - bo || byDue(a, b);
     })
     .slice(0, n);
+}
+
+/** 区间内按天分组的任务（只返回有任务的日子），用于小部件的周/月视图 */
+export function tasksByDayBetween(from: Date, to: Date): { date: Date; tasks: Task[] }[] {
+  const start = startOfDay(from).getTime();
+  const end = startOfDay(to).getTime() + 86_400_000;
+  const groups = new Map<string, Task[]>();
+  for (const t of state.tasks) {
+    if (!t.dueAt) continue;
+    const d = fromStamp(t.dueAt);
+    if (!d || d.getTime() < start || d.getTime() >= end) continue;
+    const key = dayKey(d);
+    const list = groups.get(key);
+    if (list) list.push(t);
+    else groups.set(key, [t]);
+  }
+  return [...groups.entries()]
+    .map(([key, tasks]) => ({
+      date: new Date(`${key}T00:00:00`),
+      tasks: tasks.sort(byDue),
+    }))
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
+}
+
+/** 某天完成情况，用于分组标题右侧的 x/y */
+export function dayProgress(tasks: Task[]): string {
+  const done = tasks.filter((t) => t.done).length;
+  return `${done}/${tasks.length}`;
 }
 
 /** 有任务的日期集合，供月历画圆点 */

@@ -1,54 +1,100 @@
 <script setup lang="ts">
-// 桌面小部件：钉在壁纸层常驻显示，不抢焦点。
-// 交互克制——点击任务行会唤出面板去编辑，避免在小部件里塞复杂表单。
+// 桌面小部件：常驻桌面，可点选日期、切今天/本周/本月三种范围。
+// 任务行点开会在面板里打开编辑窗；勾选框直接改完成状态。
 import { computed, ref } from "vue";
-import { api, type Task } from "../lib/api";
-import { state, todayGroups, todayProgress, upcoming } from "../lib/store";
-import { fromStamp, humanDay, weekdayCN } from "../lib/time";
+import { api } from "../lib/api";
+import {
+  dayProgress,
+  state,
+  tasksByDayBetween,
+  tasksOnDay,
+  todayProgress,
+} from "../lib/store";
+import {
+  addDays,
+  dayKey,
+  endOfMonth,
+  humanDay,
+  startOfWeek,
+  weekdayCN,
+} from "../lib/time";
 import MiniMonth from "./MiniMonth.vue";
 import TaskRow from "./TaskRow.vue";
 
+type Scope = "day" | "week" | "month";
+
 const view = ref(new Date(state.now.getFullYear(), state.now.getMonth(), 1));
+const scope = ref<Scope>("day");
+const focusDate = ref(new Date(state.now));
 
 const monthLabel = computed(
   () => `${view.value.getFullYear()}年${view.value.getMonth() + 1}月`,
 );
-const todayLabel = computed(
-  () =>
-    `今天 · ${state.now.getMonth() + 1}月${state.now.getDate()}日 周${weekdayCN(state.now)}`,
+const isToday = computed(() => dayKey(focusDate.value) === dayKey(state.now));
+
+const weekStart = computed(() => startOfWeek(focusDate.value));
+const weekEnd = computed(() => addDays(weekStart.value, 6));
+const monthStart = computed(
+  () => new Date(view.value.getFullYear(), view.value.getMonth(), 1),
 );
+const monthEnd = computed(() => endOfMonth(view.value));
+
+/** 单日范围（今天或点选的某天） */
+const dayList = computed(() => tasksOnDay(focusDate.value));
+/** 周/月范围，按天分组 */
+const groups = computed(() => {
+  if (scope.value === "week") return tasksByDayBetween(weekStart.value, weekEnd.value);
+  if (scope.value === "month") return tasksByDayBetween(monthStart.value, monthEnd.value);
+  return [];
+});
+
+const listTitle = computed(() => {
+  if (scope.value === "week") {
+    const a = weekStart.value;
+    const b = weekEnd.value;
+    return `本周 · ${a.getMonth() + 1}月${a.getDate()}日 – ${b.getMonth() + 1}月${b.getDate()}日`;
+  }
+  if (scope.value === "month") {
+    return `${monthStart.value.getFullYear()}年${monthStart.value.getMonth() + 1}月`;
+  }
+  if (isToday.value) {
+    return `今天 · ${state.now.getMonth() + 1}月${state.now.getDate()}日 周${weekdayCN(state.now)}`;
+  }
+  return humanDay(focusDate.value);
+});
+
 const progress = computed(() => todayProgress());
-const groups = computed(() => todayGroups());
-
-/** 今天没安排时，顺势展示接下来最近的几条，避免小部件空着 */
-const fallback = computed(() => upcoming(state.now, 5));
-const showFallback = computed(
-  () => groups.value.overdue.length + groups.value.pending.length === 0,
+const rangeCount = computed(() =>
+  groups.value.reduce((n, g) => n + g.tasks.length, 0),
 );
 
-const list = computed<Task[]>(() =>
-  showFallback.value
-    ? fallback.value
-    : [...groups.value.overdue, ...groups.value.pending],
-);
+function pickScope(s: Scope) {
+  scope.value = s;
+  if (s === "day") focusDate.value = new Date(state.now);
+}
 
-const shiftMonth = (n: number) => {
+/** 点日历上的某天 → 切到那一天 */
+function pickDate(d: Date) {
+  focusDate.value = d;
+  scope.value = "day";
+}
+
+function shiftMonth(n: number) {
   view.value = new Date(view.value.getFullYear(), view.value.getMonth() + n, 1);
-};
+}
 
 const footText = computed(() => {
   const { done, total } = progress.value;
   if (total === 0) return "今天还没有安排";
-  if (done === total) return "都完成啦，今天很老实 ✓";
-  return `今天 ${done}/${total} 完成`;
+  if (done === total) return "都完成啦 ✓";
+  return `今天 ${done}/${total}`;
 });
 
 /**
  * 拖动窗口。
  *
- * 钉到壁纸层后窗口变成子窗口，系统的原生拖动（data-tauri-drag-region）不再生效，
- * 所以这里自己跟踪指针位移、按物理像素上报，由 Rust 侧统一换算成屏幕坐标摆放。
- * 不管钉没钉住都走这一条路径，行为一致。
+ * 钉到桌面层后窗口变成子窗口，系统的原生拖动（data-tauri-drag-region）不再生效，
+ * 所以这里自己跟踪指针位移、按物理像素上报，由 Rust 侧换算成屏幕坐标摆放。
  */
 function startDrag(e: PointerEvent) {
   if (e.button !== 0) return;
@@ -98,23 +144,60 @@ function startDrag(e: PointerEvent) {
       </span>
     </div>
 
-    <MiniMonth :year="view.getFullYear()" :month0="view.getMonth()" />
+    <MiniMonth
+      :year="view.getFullYear()"
+      :month0="view.getMonth()"
+      :selected="dayKey(focusDate)"
+      @pick="pickDate"
+    />
 
     <div class="w-div" />
 
-    <div class="w-today-head">
-      <b>{{ todayLabel }}</b>
-      <span class="w-count">{{ progress.done }}/{{ progress.total }}</span>
+    <div class="w-tabs">
+      <button :class="{ on: scope === 'day' && isToday }" @click="pickScope('day')">今天</button>
+      <button :class="{ on: scope === 'week' }" @click="pickScope('week')">本周</button>
+      <button :class="{ on: scope === 'month' }" @click="pickScope('month')">本月</button>
+      <span class="sp" />
+      <span class="w-count">{{ scope === "day" ? `${progress.done}/${progress.total}` : rangeCount }}</span>
     </div>
 
     <div class="w-list">
-      <template v-if="list.length">
-        <div v-for="t in list" :key="t.id" class="w-item">
-          <span v-if="showFallback" class="w-day">{{ humanDay(fromStamp(t.dueAt)!) }}</span>
-          <TaskRow :task="t" @open="api.showPanel()" />
-        </div>
+      <div class="w-title">
+        <b>{{ listTitle }}</b>
+        <button v-if="scope === 'day' && !isToday" class="w-back" @click="pickScope('day')">
+          回到今天
+        </button>
+      </div>
+
+      <!-- 单日：一条平铺列表 -->
+      <template v-if="scope === 'day'">
+        <TaskRow
+          v-for="t in dayList"
+          :key="t.id"
+          :task="t"
+          @open="api.openTask(t.id)"
+        />
+        <p v-if="!dayList.length" class="w-empty">这天没有安排，双击 Ctrl 添加</p>
       </template>
-      <p v-else class="w-empty">今天没有待办，双击 Ctrl 添加</p>
+
+      <!-- 周 / 月：按天分组 -->
+      <template v-else>
+        <div v-for="g in groups" :key="dayKey(g.date)" class="w-group">
+          <div class="w-group-head">
+            <b>{{ g.date.getMonth() + 1 }}月{{ g.date.getDate() }}日 周{{ weekdayCN(g.date) }}</b>
+            <span>{{ dayProgress(g.tasks) }}</span>
+          </div>
+          <TaskRow
+            v-for="t in g.tasks"
+            :key="t.id"
+            :task="t"
+            @open="api.openTask(t.id)"
+          />
+        </div>
+        <p v-if="!groups.length" class="w-empty">
+          {{ scope === "week" ? "本周没有安排" : "本月没有安排" }}
+        </p>
+      </template>
     </div>
 
     <div class="w-foot">
@@ -175,44 +258,108 @@ function startDrag(e: PointerEvent) {
 .w-div {
   height: 1px;
   background: var(--hairline);
-  margin: 12px -16px;
+  margin: 12px -16px 0;
 }
 
-.w-today-head {
+/* ---------- 范围切换 ---------- */
+.w-tabs {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 13.5px;
-  padding: 0 2px 8px;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 2px 7px;
 }
 
-.w-today-head b {
+.w-tabs button {
+  font-size: 12.5px;
+  color: var(--text-2);
+  padding: 3.5px 11px;
+  border-radius: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.w-tabs button:hover {
+  background: var(--surface-2);
+}
+
+.w-tabs button.on {
+  background: var(--accent-weak);
+  color: var(--accent-deep);
   font-weight: 600;
+}
+
+[data-mode="dark"] .w-tabs button.on {
+  color: var(--accent);
+}
+
+.w-tabs .sp {
+  flex: 1;
 }
 
 .w-count {
   color: var(--text-3);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  padding-right: 2px;
 }
 
+/* ---------- 列表 ---------- */
 .w-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  margin: 0 -4px;
-  padding: 0 4px;
+  margin: 0 -6px;
+  padding: 0 6px;
 }
 
-.w-item {
-  position: relative;
+.w-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 2px 2px 4px;
 }
 
-.w-day {
-  display: block;
+.w-title b {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.w-back {
+  font-size: 11px;
+  color: var(--accent-deep);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+[data-mode="dark"] .w-back {
+  color: var(--accent);
+}
+
+.w-back:hover {
+  background: var(--accent-weak);
+}
+
+.w-group {
+  padding-bottom: 4px;
+}
+
+.w-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 7px 8px 1px;
+}
+
+.w-group-head b {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.w-group-head span {
   font-size: 11px;
   color: var(--text-3);
-  padding: 8px 8px 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .w-empty {
@@ -221,6 +368,7 @@ function startDrag(e: PointerEvent) {
   padding: 12px 8px;
 }
 
+/* ---------- 底栏 ---------- */
 .w-foot {
   display: flex;
   align-items: center;

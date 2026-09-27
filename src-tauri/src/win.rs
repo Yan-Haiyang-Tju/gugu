@@ -109,36 +109,6 @@ fn worker_child_of(parent: HWND) -> Option<HWND> {
     }
 }
 
-pub fn unpin(hwnd: HWND) -> bool {
-    unsafe {
-        if SetParent(hwnd, None).is_err() {
-            return false;
-        }
-        // SetParent(NULL) 不会自动把 WS_CHILD 换回 WS_POPUP，
-        // 不补这一步窗口会失去无边框样式（变形、带标题栏）
-        let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        style = (style & !WS_CHILD.0) | WS_POPUP.0;
-        SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
-        let _ = SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            0,
-            0,
-            SET_WINDOW_POS_FLAGS(
-                SWP_NOMOVE.0 | SWP_NOSIZE.0 | SWP_NOZORDER.0 | SWP_FRAMECHANGED.0,
-            ),
-        );
-        true
-    }
-}
-
-/// 窗口当前是否已被钉在桌面上
-pub fn is_pinned(hwnd: HWND) -> bool {
-    unsafe { GetParent(hwnd).map(|p| !p.is_invalid()).unwrap_or(false) }
-}
-
 /// 切换小部件所在的层级：
 /// - `above_icons = false` → 挂在壁纸层 WorkerW 里，落在桌面图标**下方**（不挡桌面，但收不到点击）
 /// - `above_icons = true`  → 直接挂到 Progman 下并置顶，浮到图标**上方**（可点击可拖动，会盖住图标）

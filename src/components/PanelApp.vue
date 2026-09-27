@@ -76,6 +76,11 @@ onMounted(async () => {
   await listen("panel:settings", () => {
     tab.value = "settings";
   });
+  // 小部件里点了某个任务 → 直接打开它的编辑窗
+  await listen("panel:edit", (e) => {
+    const task = state.tasks.find((t) => t.id === (e.payload as number));
+    if (task) openEditor(task);
+  });
 
   quickFocus.value++;
 });

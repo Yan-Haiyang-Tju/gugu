@@ -61,6 +61,11 @@ export function addMonths(d: Date, n: number): Date {
   return r;
 }
 
+/** 该月最后一天 */
+export function endOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+
 /** "16:30" */
 export function fmtHM(d: Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;

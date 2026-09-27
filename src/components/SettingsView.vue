@@ -100,14 +100,26 @@ async function doExport() {
         />
       </div>
       <div class="row">
-        <label>钉在桌面</label>
-        <input
-          type="checkbox"
-          :checked="s.pinDesktop"
-          @change="patchSettings({ pinDesktop: ($event.target as HTMLInputElement).checked })"
-        />
-        <span class="tip">贴到壁纸层，被窗口遮挡，按 Win+D 回到桌面即见</span>
+        <label>小部件层级</label>
+        <div class="seg">
+          <button
+            :class="{ on: s.widgetLayer === 'float' }"
+            @click="patchSettings({ widgetLayer: 'float' })"
+          >
+            浮在图标上
+          </button>
+          <button
+            :class="{ on: s.widgetLayer === 'wallpaper' }"
+            @click="patchSettings({ widgetLayer: 'wallpaper' })"
+          >
+            沉到图标下
+          </button>
+        </div>
       </div>
+      <p class="tip-line">
+        浮在图标上：随时能点、能拖，代价是盖住它下面那块桌面图标；
+        沉到图标下：完全不占地方，但收不到鼠标点击，只能双击 Ctrl 唤出面板操作。
+      </p>
       <div class="row">
         <label>鼠标穿透</label>
         <input
@@ -259,6 +271,13 @@ h4 {
   color: var(--text-3);
   line-height: 1.4;
   flex: 1;
+}
+
+.tip-line {
+  font-size: 10.5px;
+  color: var(--text-3);
+  line-height: 1.5;
+  padding: 0 2px 4px 84px;
 }
 
 .themes {

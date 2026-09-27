@@ -60,7 +60,8 @@ export interface Settings {
   glassAlpha: number;
   blur: boolean;
   widgetVisible: boolean;
-  pinDesktop: boolean;
+  /** float = 浮在桌面图标之上（可点击可拖动）；wallpaper = 沉到图标之下（纯展示） */
+  widgetLayer: "float" | "wallpaper";
   clickThrough: boolean;
   hotkeyEnabled: boolean;
   hotkeyWindowMs: number;
@@ -95,6 +96,8 @@ export const api = {
 
   // ---- 窗口 ----
   showPanel: () => invoke<void>("show_panel_cmd"),
+  /** 打开某任务的编辑窗（小部件里点任务时用） */
+  openTask: (id: number) => invoke<void>("open_task", { id }),
   showPanelAdd: () => invoke<void>("show_panel_add"),
   showPanelSettings: () => invoke<void>("show_panel_settings"),
   hidePanel: () => invoke<void>("hide_panel_cmd"),
