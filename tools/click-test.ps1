@@ -33,11 +33,15 @@ Write-Output ("hit class=" + (C $hit) + " pid=" + (PidOf $hit))
 if ($env:CLICK_GO -eq "1") {
   # MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004
   # (1 = MOUSEEVENTF_MOVE, easy to mistake - sending 1/2 never produces a real click)
+  # The finally block guarantees the button is released even if this is interrupted.
   [CT]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)   # release any stuck button first
   Start-Sleep -Milliseconds 40
-  [CT]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)   # left down
-  Start-Sleep -Milliseconds 70
-  [CT]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)   # left up
+  try {
+    [CT]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)   # left down
+    Start-Sleep -Milliseconds 70
+  } finally {
+    [CT]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)   # left up
+  }
   Write-Output "clicked (down+up)"
 } else {
   Write-Output "(dry run, set CLICK_GO=1 to actually click)"

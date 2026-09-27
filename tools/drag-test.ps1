@@ -31,14 +31,19 @@ if ($dy -eq 0) { $dy = 90 }
 Start-Sleep -Milliseconds 200
 [void][DG]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)   # release any stuck button
 Start-Sleep -Milliseconds 60
-[void][DG]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)   # left down
-Start-Sleep -Milliseconds 80
-for ($i = 1; $i -le 12; $i++) {
-  [void][DG]::SetCursorPos($sx + [int]($dx * $i / 12), $sy + [int]($dy * $i / 12))
-  Start-Sleep -Milliseconds 25
+# The finally block guarantees the button is released even if this is interrupted -
+# a stuck mouse button makes the whole desktop behave as if it is held.
+try {
+  [void][DG]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)   # left down
+  Start-Sleep -Milliseconds 80
+  for ($i = 1; $i -le 12; $i++) {
+    [void][DG]::SetCursorPos($sx + [int]($dx * $i / 12), $sy + [int]($dy * $i / 12))
+    Start-Sleep -Milliseconds 25
+  }
+  Start-Sleep -Milliseconds 80
+} finally {
+  [void][DG]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)   # left up
 }
-Start-Sleep -Milliseconds 80
-[void][DG]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)   # left up
 Start-Sleep -Milliseconds 400
 
 $r2 = New-Object DG+RECT
