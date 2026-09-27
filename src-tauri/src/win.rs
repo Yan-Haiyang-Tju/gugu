@@ -281,11 +281,11 @@ pub fn detach_and_raise(hwnd: HWND) {
 
         // 注意：子窗口转成顶层窗口时，同一个数值会被按新的坐标空间重新解释，
         // 所以这里必须把屏幕坐标显式写回去，不能图省事用 SWP_NOMOVE。
-        // -1 = HWND_TOPMOST
-        let topmost = HWND(-1isize as *mut core::ffi::c_void);
+        // 用 HWND_TOP 而不是 HWND_TOPMOST：抬到「当前画面之上」就够了，
+        // 仍留在普通窗口层里，用户打开别的应用时能正常把它盖住。
         let _ = SetWindowPos(
             hwnd,
-            Some(topmost),
+            Some(HWND::default()), // HWND_TOP
             x,
             y,
             w,
@@ -293,6 +293,26 @@ pub fn detach_and_raise(hwnd: HWND) {
             SET_WINDOW_POS_FLAGS(SWP_FRAMECHANGED.0 | SWP_SHOWWINDOW.0),
         );
     }
+}
+
+/// 把普通窗口抬到同层的最前面（不改变置顶状态）
+pub fn raise_window(hwnd: HWND) {
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND::default()), // HWND_TOP
+            0,
+            0,
+            0,
+            0,
+            SET_WINDOW_POS_FLAGS(SWP_NOMOVE.0 | SWP_NOSIZE.0),
+        );
+    }
+}
+
+/// 该窗口是不是当前的前台窗口（用来判断「已经在最前面」还是「被盖住了」）
+pub fn is_foreground(hwnd: HWND) -> bool {
+    unsafe { GetForegroundWindow() == hwnd }
 }
 
 

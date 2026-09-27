@@ -31,13 +31,16 @@ $cb = [FW+EnumProc]{
     [void][FW]::GetWindowRect($h, [ref]$r)
     $style = [FW]::GetWindowLongPtrW($h, -16).ToInt64()
     $isChild = ($style -band 0x40000000) -ne 0
+    # GWL_EXSTYLE(-20) 的 0x8 位 = WS_EX_TOPMOST
+    $ex = [FW]::GetWindowLongPtrW($h, -20).ToInt64()
+    $topmost = ($ex -band 0x8) -ne 0
     $chain = @()
     $cur = $h
     for ($i = 0; $i -lt 6 -and $cur -ne [IntPtr]::Zero; $i++) {
       $chain += ((C $cur) + "#" + $cur)
       $cur = [FW]::GetParent($cur)
     }
-    [void]$script:hits.Add(("class={0} hwnd={1} WS_CHILD={2} visible={3} rect={4}x{5}" -f (C $h), $h, $isChild, [FW]::IsWindowVisible($h), ($r.Right-$r.Left), ($r.Bottom-$r.Top)))
+    [void]$script:hits.Add(("class={0} hwnd={1} WS_CHILD={2} TOPMOST={3} visible={4} rect={5}x{6}" -f (C $h), $h, $isChild, $topmost, [FW]::IsWindowVisible($h), ($r.Right-$r.Left), ($r.Bottom-$r.Top)))
     [void]$script:hits.Add(("     ancestors: " + ($chain -join " -> ")))
   }
   return $true

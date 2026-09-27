@@ -120,9 +120,10 @@ pub fn show_panel_with(app: &AppHandle, event: &str) {
     set_operate_mode(app, true);
     if let Some(w) = panel(app) {
         let _ = w.show();
-        // 操作模式下小部件是置顶的，面板要是普通层级就会被它压住
-        // （用户把小部件拖到面板上就会点不动面板）。把面板也置顶并后抬，保证它在上。
-        let _ = w.set_always_on_top(true);
+        // 小部件刚被抬到同层最前，面板要再抬一次才在它之上（两者都是普通窗口层）
+        if let Ok(hwnd) = w.hwnd() {
+            win::raise_window(hwnd);
+        }
         let _ = w.set_focus();
         let _ = app.emit(event, ());
     }
@@ -144,9 +145,15 @@ pub fn toggle_panel(app: &AppHandle) {
         eprintln!("[gugu] 切换面板失败：找不到 panel 窗口");
         return;
     };
-    let visible = w.is_visible().unwrap_or(false);
-    println!("[gugu] 切换面板：当前 visible={visible}");
-    if visible {
+    if !w.is_visible().unwrap_or(false) {
+        show_panel(app);
+        return;
+    }
+    // 已经显示着：只有在它本来就位于最前面时，再按一次才理解为「收起」。
+    // 如果是被别的窗口盖住了，再按一次应当是「重新抬回来」——
+    // 否则用户切去别的应用之后按热键，东西会直接消失，跟预期相反。
+    let front = w.hwnd().map(win::is_foreground).unwrap_or(false);
+    if front {
         hide_panel(app);
     } else {
         show_panel(app);
