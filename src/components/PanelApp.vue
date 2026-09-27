@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 唤出面板：快速添加 + 今天/周/月三视图 + 设置。平时隐藏，双击 Ctrl 唤出。
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api, type Task, type TaskPrefill } from "../lib/api";
 import { state, todayProgress } from "../lib/store";
@@ -37,6 +38,24 @@ function onQuick(p: TaskPrefill) {
   editing.value = null;
   prefill.value = p;
   editorOpen.value = true;
+}
+
+/**
+ * 拖动面板。
+ *
+ * 不用 data-tauri-drag-region：它只认「按下的目标元素本身」带这个属性，
+ * 而面板顶部整条都被快速添加框占着，按下去的目标永远是里面的输入框，
+ * 于是整块区域等于没有可拖的地方。这里直接调系统的原生拖动。
+ */
+async function startDrag(e: PointerEvent) {
+  if (e.button !== 0) return;
+  // 输入框、按钮这些要正常交互，不能拿来拖窗口
+  if ((e.target as HTMLElement).closest("input, button, select, textarea, a")) return;
+  await getCurrentWindow().startDragging();
+}
+
+function setTab(t: typeof tab.value) {
+  tab.value = t;
 }
 
 function onKey(e: KeyboardEvent) {
@@ -86,14 +105,17 @@ const weekIsCurrent = computed(
 
 <template>
   <div class="win panel">
-    <div class="p-top drag" data-tauri-drag-region>
+    <!-- 抓手：给面板一个明确的可拖区域，按空白处也能拖整条标签栏 -->
+    <div class="p-grip" title="拖动面板" @pointerdown="startDrag"><i /></div>
+
+    <div class="p-top">
       <QuickAdd :focus-signal="quickFocus" @submit="onQuick" />
     </div>
 
-    <nav class="tabs">
-      <button data-tab="today" :class="{ on: tab === 'today' }" @click="tab = 'today'">今天</button>
-      <button data-tab="week" :class="{ on: tab === 'week' }" @click="tab = 'week'">周</button>
-      <button data-tab="month" :class="{ on: tab === 'month' }" @click="tab = 'month'">月</button>
+    <nav class="tabs" @pointerdown="startDrag">
+      <button data-tab="today" :class="{ on: tab === 'today' }" @click="setTab('today')">今天</button>
+      <button data-tab="week" :class="{ on: tab === 'week' }" @click="setTab('week')">周</button>
+      <button data-tab="month" :class="{ on: tab === 'month' }" @click="setTab('month')">月</button>
       <span class="t-sp" />
       <template v-if="tab === 'week'">
         <button class="ghost" title="上一周" @click="shiftWeek(-1)">‹</button>
@@ -141,11 +163,37 @@ const weekIsCurrent = computed(
 
 <style scoped>
 .panel {
-  padding: 14px 14px 0;
+  padding: 0 14px 0;
+}
+
+/* 顶部抓手：明确告诉用户「这里可以拖」 */
+.p-grip {
+  height: 14px;
+  flex: none;
+  margin: 0 -14px;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+}
+
+.p-grip:active {
+  cursor: grabbing;
+}
+
+.p-grip i {
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--hairline);
+  transition: background 0.15s;
+}
+
+.p-grip:hover i {
+  background: var(--text-3);
 }
 
 .p-top {
-  padding-bottom: 2px;
+  padding: 3px 0 2px;
 }
 
 .tabs {

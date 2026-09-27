@@ -2,6 +2,7 @@
 // 桌面小部件：常驻桌面，可点选日期、切今天/本周/本月三种范围。
 // 任务行点开会在面板里打开编辑窗；勾选框直接改完成状态。
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, onMounted, ref } from "vue";
 import { api } from "../lib/api";
 import {
@@ -31,6 +32,12 @@ const focusDate = ref(new Date(state.now));
 const operating = ref(false);
 
 onMounted(async () => {
+  // 主动问一次当前状态：页面重载会丢掉事件期间设过的标志
+  try {
+    operating.value = await api.widgetOperating();
+  } catch {
+    operating.value = false;
+  }
   await listen<string>("widget:mode", (e) => {
     operating.value = e.payload === "operate";
   });
@@ -102,43 +109,16 @@ const footText = computed(() => {
 /**
  * 拖动窗口。
  *
- * 钉到桌面层后窗口变成子窗口，系统的原生拖动（data-tauri-drag-region）不再生效，
- * 所以这里自己跟踪指针位移、按物理像素上报，由 Rust 侧换算成屏幕坐标摆放。
+ * 只有操作模式（按了双击 Ctrl、窗口已升到顶层）才拖得动——沉在桌面层时
+ * 窗口根本收不到鼠标。这里直接用系统的原生拖动：它会进入 Windows 自己的
+ * 移动循环，比手动跟踪指针位移稳得多（手动方案在移动窗口的过程中会打断
+ * 浏览器的指针事件序列，拖两下就断）。
  */
-function startDrag(e: PointerEvent) {
-  if (e.button !== 0) return;
-  const dpr = window.devicePixelRatio || 1;
-  let lastX = e.screenX;
-  let lastY = e.screenY;
-  let dx = 0;
-  let dy = 0;
-  let raf = 0;
-
-  // 合并到每一帧发一次，避免拖动时把 IPC 打满
-  const flush = () => {
-    raf = 0;
-    if (dx || dy) {
-      void api.nudgeWidget(dx, dy);
-      dx = 0;
-      dy = 0;
-    }
-  };
-  const move = (ev: PointerEvent) => {
-    dx += Math.round((ev.screenX - lastX) * dpr);
-    dy += Math.round((ev.screenY - lastY) * dpr);
-    lastX = ev.screenX;
-    lastY = ev.screenY;
-    if (!raf) raf = requestAnimationFrame(flush);
-  };
-  const up = () => {
-    window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", up);
-    if (raf) cancelAnimationFrame(raf);
-    flush();
-    void api.saveWidgetPos();
-  };
-  window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", up);
+async function startDrag(e: PointerEvent) {
+  if (e.button !== 0 || !operating.value) return;
+  await getCurrentWindow().startDragging();
+  // 移动循环结束后才返回，此时把新位置记下来
+  void api.saveWidgetPos();
 }
 </script>
 

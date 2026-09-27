@@ -74,6 +74,7 @@ fn widget(app: &AppHandle) -> Option<WebviewWindow> {
 /// 平时小部件是 explorer 的子窗口（跨进程），那种状态下 WebView2 收不到鼠标输入，
 /// 所以「能操作」和「在桌面层」二者只能取其一——默认沉在桌面，按快捷键才升起来。
 fn set_operate_mode(app: &AppHandle, on: bool) {
+    let t0 = std::time::Instant::now();
     let Some(w) = widget(app) else { return };
     let Ok(hwnd) = w.hwnd() else { return };
     let settings = app.state::<Store>().settings();
@@ -88,6 +89,13 @@ fn set_operate_mode(app: &AppHandle, on: bool) {
         win::set_widget_layer(hwnd, widget_layer_is_float(&settings));
     }
     win::apply_widget_styles(hwnd, click_through, on);
+
+    // 这段跑在主线程上，里面的跨进程 SetParent 有可能阻塞；
+    // 记一下耗时，超过百毫秒就说明它正是把键盘钩子拖超时（并导致其被摘除）的元凶。
+    let cost = t0.elapsed().as_millis();
+    if cost > 50 {
+        println!("[gugu] 切换窗口层级耗时 {cost}ms（跨进程 SetParent 阻塞）");
+    }
 
     // 让小部件知道自己当前能不能被操作，好在界面上给出提示
     let _ = app.emit("widget:mode", if on { "operate" } else { "idle" });
@@ -112,6 +120,9 @@ pub fn show_panel_with(app: &AppHandle, event: &str) {
     set_operate_mode(app, true);
     if let Some(w) = panel(app) {
         let _ = w.show();
+        // 操作模式下小部件是置顶的，面板要是普通层级就会被它压住
+        // （用户把小部件拖到面板上就会点不动面板）。把面板也置顶并后抬，保证它在上。
+        let _ = w.set_always_on_top(true);
         let _ = w.set_focus();
         let _ = app.emit(event, ());
     }
@@ -129,8 +140,13 @@ pub fn show_panel(app: &AppHandle) {
 }
 
 pub fn toggle_panel(app: &AppHandle) {
-    let Some(w) = panel(app) else { return };
-    if w.is_visible().unwrap_or(false) {
+    let Some(w) = panel(app) else {
+        eprintln!("[gugu] 切换面板失败：找不到 panel 窗口");
+        return;
+    };
+    let visible = w.is_visible().unwrap_or(false);
+    println!("[gugu] 切换面板：当前 visible={visible}");
+    if visible {
         hide_panel(app);
     } else {
         show_panel(app);
@@ -294,6 +310,23 @@ fn blur_active() -> bool {
     win::backdrop_blur_available()
 }
 
+/// 开发期用：把前端的一条消息打进应用日志。
+/// 用来确认「某个交互事件到底有没有触发」，比隔着窗口猜要快得多。
+#[tauri::command]
+fn debug_log(msg: String) {
+    println!("[gugu:ui] {msg}");
+}
+
+/// 小部件当前是否处于操作模式。
+///
+/// 前端除了监听 widget:mode 事件，挂载时也要主动问一次：
+/// 页面重载（开发期 HMR、或任何原因的重刷）会把事件期间设的标志丢掉，
+/// 导致「窗口明明已经升起来了，界面却以为不能拖」。
+#[tauri::command]
+fn widget_operating(app: AppHandle) -> bool {
+    panel_is_open(&app)
+}
+
 #[tauri::command]
 fn set_settings(
     app: AppHandle,
@@ -362,45 +395,6 @@ fn save_widget_pos(app: AppHandle, store: tauri::State<'_, Store>) {
     }
 }
 
-/// 按屏幕坐标平移小部件。
-///
-/// 钉到壁纸层之后窗口变成了子窗口，系统的原生拖动不再生效，
-/// 所以由前端上报指针位移，这里统一换算成屏幕坐标再摆放——
-/// 无论钉没钉住都走同一条路径。
-#[tauri::command]
-fn nudge_widget(app: AppHandle, store: tauri::State<'_, Store>, dx: i32, dy: i32) {
-    let Some(w) = widget(&app) else { return };
-    let Ok(hwnd) = w.hwnd() else { return };
-    let Some((x, y, cw, _)) = win::screen_rect(hwnd) else {
-        return;
-    };
-
-    let mut nx = x + dx;
-    let mut ny = y + dy;
-
-    // 至少让窗口的一角留在屏幕内，避免拖丢
-    if let Ok(monitors) = app.available_monitors() {
-        if !monitors.is_empty() {
-            let min_x = monitors.iter().map(|m| m.position().x).min().unwrap_or(0);
-            let min_y = monitors.iter().map(|m| m.position().y).min().unwrap_or(0);
-            let max_x = monitors
-                .iter()
-                .map(|m| m.position().x + m.size().width as i32)
-                .max()
-                .unwrap_or(1920);
-            let max_y = monitors
-                .iter()
-                .map(|m| m.position().y + m.size().height as i32)
-                .max()
-                .unwrap_or(1080);
-            nx = nx.clamp(min_x - cw + 60, max_x - 60);
-            ny = ny.clamp(min_y, max_y - 40);
-        }
-    }
-
-    win::place_on_screen(hwnd, nx, ny);
-    store.update_settings(&json!({ "widgetX": nx, "widgetY": ny }));
-}
 
 #[tauri::command]
 fn reset_widget_pos(app: AppHandle, store: tauri::State<'_, Store>) {
@@ -546,6 +540,8 @@ pub fn run() {
             delete_task,
             get_settings,
             blur_active,
+            debug_log,
+            widget_operating,
             set_settings,
             show_panel_cmd,
             show_panel_add,
@@ -555,7 +551,6 @@ pub fn run() {
             open_task,
             focus_widget,
             save_widget_pos,
-            nudge_widget,
             reset_widget_pos,
             get_autostart,
             set_autostart,

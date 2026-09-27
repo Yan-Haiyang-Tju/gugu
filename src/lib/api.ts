@@ -92,6 +92,10 @@ export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   /** 系统级磨砂是否可用（小部件钉成子窗口后，这个能力不一定有） */
   blurActive: () => invoke<boolean>("blur_active"),
+  /** 小部件当前是否处于操作模式（已升到顶层、可点可拖） */
+  widgetOperating: () => invoke<boolean>("widget_operating"),
+  /** 开发期：把一条消息打进应用日志，用于确认交互事件是否触发 */
+  debugLog: (msg: string) => invoke<void>("debug_log", { msg }),
   setSettings: (patch: Partial<Settings>) => invoke<Settings>("set_settings", { patch }),
 
   // ---- 窗口 ----
@@ -103,7 +107,6 @@ export const api = {
   hidePanel: () => invoke<void>("hide_panel_cmd"),
   togglePanel: () => invoke<void>("toggle_panel_cmd"),
   saveWidgetPos: () => invoke<void>("save_widget_pos"),
-  nudgeWidget: (dx: number, dy: number) => invoke<void>("nudge_widget", { dx, dy }),
   resetWidgetPos: () => invoke<void>("reset_widget_pos"),
 
   // ---- 系统 ----

@@ -373,7 +373,10 @@ unsafe extern "system" fn kb_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
     if code == 0 && ENABLED.load(Ordering::Relaxed) {
         let kb = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
         let injected = kb.flags.0 & LLKHF_INJECTED.0 != 0;
-        if !injected {
+        // 发布版忽略合成按键，避免被其它程序的模拟输入误触；
+        // 调试版放行，这样自动化脚本才能验证整条热键链路。
+        let ignore = injected && !cfg!(debug_assertions);
+        if !ignore {
             let vk = kb.vkCode;
             let is_ctrl = vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL;
             let msg = wparam.0;
@@ -408,21 +411,33 @@ unsafe extern "system" fn kb_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
-/// 在主线程安装低级键盘钩子，并起一个消费触发的常驻线程。
+/// 安装低级键盘钩子，并起一个消费触发的常驻线程。
+///
+/// 钩子装在**独立线程**上（不是主线程），这点很关键：低级钩子的回调由安装它的
+/// 线程的消息循环驱动，回调超时（系统默认 300ms）会被 Windows 静默摘除，热键从此失效。
+/// 主线程要跑窗口操作，其中跨进程 SetParent 可能阻塞上百毫秒甚至更久，
+/// 装在主线程上就会被连带摘掉——表现正是「第一次能用，之后就失灵」。
 pub fn install_hotkey(app: AppHandle) {
     let (tx, rx) = mpsc::channel::<()>();
     let _ = TRIGGER_TX.set(tx);
+
+    // 消费者：钩子回调里只做一次 send，真正的活交给主线程事件循环
     std::thread::spawn(move || {
-        // recv 阻塞等待，钩子回调里只做一次 send，绝不阻塞系统输入
         while rx.recv().is_ok() {
+            println!("[gugu] 热键触发");
             let handle = app.clone();
             let inner = handle.clone();
-            let _ = handle.run_on_main_thread(move || crate::toggle_panel(&inner));
+            if handle
+                .run_on_main_thread(move || crate::toggle_panel(&inner))
+                .is_err()
+            {
+                eprintln!("[gugu] 热键回调投递失败（主线程事件循环不可用）");
+            }
         }
     });
 
-    unsafe {
-        // GetModuleHandleW 返回 HMODULE，而钩子要的是 HINSTANCE，两者底层同为模块句柄
+    // 钩子线程：装好钩子后必须一直跑消息循环，否则回调不会被调用
+    std::thread::spawn(|| unsafe {
         let hmod = GetModuleHandleW(PCWSTR::null())
             .ok()
             .map(|m| HINSTANCE(m.0));
@@ -431,9 +446,17 @@ pub fn install_hotkey(app: AppHandle) {
                 HOOK.store(h.0 as isize, Ordering::SeqCst);
                 println!("[gugu] 双击 Ctrl 热键已就绪");
             }
-            Err(e) => eprintln!("[gugu] 热键钩子安装失败：{e}"),
+            Err(e) => {
+                eprintln!("[gugu] 热键钩子安装失败：{e}");
+                return;
+            }
         }
-    }
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    });
 }
 
 pub fn set_hotkey_enabled(on: bool) {
