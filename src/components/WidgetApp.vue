@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 桌面小部件：常驻桌面，可点选日期、切今天/本周/本月三种范围。
 // 任务行点开会在面板里打开编辑窗；勾选框直接改完成状态。
-import { computed, ref } from "vue";
+import { listen } from "@tauri-apps/api/event";
+import { computed, onMounted, ref } from "vue";
 import { api } from "../lib/api";
 import {
   dayProgress,
@@ -26,6 +27,14 @@ type Scope = "day" | "week" | "month";
 const view = ref(new Date(state.now.getFullYear(), state.now.getMonth(), 1));
 const scope = ref<Scope>("day");
 const focusDate = ref(new Date(state.now));
+/** 按了双击 Ctrl、小部件被升到顶层时才为 true —— 只有这时它才收得到鼠标 */
+const operating = ref(false);
+
+onMounted(async () => {
+  await listen<string>("widget:mode", (e) => {
+    operating.value = e.payload === "operate";
+  });
+});
 
 const monthLabel = computed(
   () => `${view.value.getFullYear()}年${view.value.getMonth() + 1}月`,
@@ -134,7 +143,7 @@ function startDrag(e: PointerEvent) {
 </script>
 
 <template>
-  <div class="win widget">
+  <div class="win widget" :class="{ operating }">
     <div class="w-head drag" @pointerdown="startDrag">
       <span class="brand">咕咕<i /></span>
       <span class="w-nav">
@@ -202,7 +211,7 @@ function startDrag(e: PointerEvent) {
 
     <div class="w-foot">
       <button class="w-add" title="新建任务" @click="api.showPanelAdd()">＋ 新建</button>
-      <span class="w-tip">{{ footText }}</span>
+      <span class="w-tip">{{ operating ? "可拖动 · Esc 收起" : footText }}</span>
       <button class="ghost" title="设置" @click="api.showPanelSettings()">⚙</button>
     </div>
   </div>
@@ -212,6 +221,12 @@ function startDrag(e: PointerEvent) {
 .widget {
   padding: 16px 16px 10px;
   gap: 0;
+}
+
+/* 操作模式（按了双击 Ctrl、已升到顶层）时给一圈强调色描边，
+   让用户一眼看出「现在可以点、可以拖」 */
+.widget.operating {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 .w-head {

@@ -100,25 +100,25 @@ async function doExport() {
         />
       </div>
       <div class="row">
-        <label>小部件层级</label>
+        <label>平时位置</label>
         <div class="seg">
-          <button
-            :class="{ on: s.widgetLayer === 'float' }"
-            @click="patchSettings({ widgetLayer: 'float' })"
-          >
-            浮在图标上
-          </button>
           <button
             :class="{ on: s.widgetLayer === 'wallpaper' }"
             @click="patchSettings({ widgetLayer: 'wallpaper' })"
           >
             沉到图标下
           </button>
+          <button
+            :class="{ on: s.widgetLayer === 'float' }"
+            @click="patchSettings({ widgetLayer: 'float' })"
+          >
+            浮在图标上
+          </button>
         </div>
       </div>
       <p class="tip-line">
-        浮在图标上：随时能点、能拖，代价是盖住它下面那块桌面图标；
-        沉到图标下：完全不占地方，但收不到鼠标点击，只能双击 Ctrl 唤出面板操作。
+        这只影响小部件平时"待"在哪一层，两种情况都是纯展示。要用它（点任务、拖位置）
+        请按 <b>双击 Ctrl</b> 把它升到最前面，Esc 或再按一次落回原位。
       </p>
       <div class="row">
         <label>鼠标穿透</label>

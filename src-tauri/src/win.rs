@@ -147,12 +147,11 @@ pub fn set_widget_layer(hwnd: HWND, above_icons: bool) -> bool {
             0,
             0,
             0,
-            SET_WINDOW_POS_FLAGS(
-                SWP_NOMOVE.0 | SWP_NOSIZE.0 | SWP_FRAMECHANGED.0,
-            ),
+            SET_WINDOW_POS_FLAGS(SWP_NOMOVE.0 | SWP_NOSIZE.0 | SWP_FRAMECHANGED.0),
         );
 
         let ok = GetParent(hwnd).unwrap_or_default() == target;
+        // 挂进桌面层后坐标相对父窗口，必须显式换算一次
         if let Some((x, y, _, _)) = before {
             place_on_screen(hwnd, x, y);
         }
@@ -243,11 +242,19 @@ pub fn backdrop_blur_available() -> bool {
     BLUR_OK.load(Ordering::Relaxed)
 }
 
-/// 加上「不抢焦点 + 不出现在 Alt+Tab」的扩展样式；可选鼠标穿透。
-pub fn apply_widget_styles(hwnd: HWND, click_through: bool) {
+/// 设置窗口的扩展样式。
+///
+/// `activatable` 是操作模式的关键：挂成跨进程子窗口时窗口不能激活，
+/// 而 WebView2 只在能激活的普通窗口里处理鼠标输入。
+pub fn apply_widget_styles(hwnd: HWND, click_through: bool, activatable: bool) {
     unsafe {
         let mut ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        ex |= WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0;
+        ex |= WS_EX_TOOLWINDOW.0; // 不出现在 Alt+Tab
+        if activatable {
+            ex &= !WS_EX_NOACTIVATE.0;
+        } else {
+            ex |= WS_EX_NOACTIVATE.0;
+        }
         if click_through {
             ex |= WS_EX_TRANSPARENT.0;
         } else {
@@ -256,6 +263,38 @@ pub fn apply_widget_styles(hwnd: HWND, click_through: bool) {
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex as isize);
     }
 }
+
+/// 把窗口从桌面层里摘出来，变成置顶的普通顶层窗口。
+///
+/// 这是「操作模式」：跨进程子窗口收不到鼠标（WebView2 的输入链路在那种状态下是断的，
+/// 实测合成点击后任务状态不变化），所以要让用户能点能拖，就必须脱离桌面层。
+pub fn detach_and_raise(hwnd: HWND) {
+    unsafe {
+        let Some((x, y, w, h)) = screen_rect(hwnd) else {
+            return;
+        };
+        let _ = SetParent(hwnd, None);
+        // SetParent(NULL) 不会自动把 WS_CHILD 换回 WS_POPUP
+        let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        style = (style & !WS_CHILD.0) | WS_POPUP.0;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
+
+        // 注意：子窗口转成顶层窗口时，同一个数值会被按新的坐标空间重新解释，
+        // 所以这里必须把屏幕坐标显式写回去，不能图省事用 SWP_NOMOVE。
+        // -1 = HWND_TOPMOST
+        let topmost = HWND(-1isize as *mut core::ffi::c_void);
+        let _ = SetWindowPos(
+            hwnd,
+            Some(topmost),
+            x,
+            y,
+            w,
+            h,
+            SET_WINDOW_POS_FLAGS(SWP_FRAMECHANGED.0 | SWP_SHOWWINDOW.0),
+        );
+    }
+}
+
 
 /// 取窗口在屏幕坐标系中的位置（钉扎成子窗口后 GetWindowRect 仍返回屏幕坐标）
 pub fn screen_rect(hwnd: HWND) -> Option<(i32, i32, i32, i32)> {

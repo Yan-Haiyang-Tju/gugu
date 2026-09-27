@@ -40,9 +40,10 @@ pub fn default_settings() -> serde_json::Value {
         "glassAlpha": 0.82,       // 玻璃面板透明度 0.50–0.95
         "blur": true,             // 毛玻璃
         "widgetVisible": true,
-        // float = 浮在桌面图标之上（可点击可拖动，也盖住那块图标）
-        // wallpaper = 沉到图标之下（完全不挡桌面，但收不到鼠标点击）
-        "widgetLayer": "float",
+        // 平时小部件待在桌面哪一层（两种都是纯展示，交互一律走快捷键升到顶层）：
+        // float = 浮在桌面图标之上（更显眼，但会盖住那块图标）
+        // wallpaper = 沉到图标之下（完全不占地方）
+        "widgetLayer": "wallpaper",
         "clickThrough": false,    // 鼠标穿透（穿透后只能用热键唤出面板）
         "hotkeyEnabled": true,
         "hotkeyWindowMs": 420,    // 双击 Ctrl 两次之间的间隔上限
@@ -68,8 +69,47 @@ fn widget(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window("widget")
 }
 
+/// 操作模式：把小部件从桌面层摘出来置顶，让它可点可拖。
+///
+/// 平时小部件是 explorer 的子窗口（跨进程），那种状态下 WebView2 收不到鼠标输入，
+/// 所以「能操作」和「在桌面层」二者只能取其一——默认沉在桌面，按快捷键才升起来。
+fn set_operate_mode(app: &AppHandle, on: bool) {
+    let Some(w) = widget(app) else { return };
+    let Ok(hwnd) = w.hwnd() else { return };
+    let settings = app.state::<Store>().settings();
+    let click_through = settings
+        .get("clickThrough")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if on {
+        win::detach_and_raise(hwnd);
+    } else {
+        win::set_widget_layer(hwnd, widget_layer_is_float(&settings));
+    }
+    win::apply_widget_styles(hwnd, click_through, on);
+
+    // 让小部件知道自己当前能不能被操作，好在界面上给出提示
+    let _ = app.emit("widget:mode", if on { "operate" } else { "idle" });
+}
+
+fn widget_layer_is_float(settings: &serde_json::Value) -> bool {
+    settings
+        .get("widgetLayer")
+        .and_then(|v| v.as_str())
+        .unwrap_or("wallpaper")
+        == "float"
+}
+
+fn panel_is_open(app: &AppHandle) -> bool {
+    panel(app)
+        .map(|p| p.is_visible().unwrap_or(false))
+        .unwrap_or(false)
+}
+
 /// 唤出面板并聚焦，同时通知前端切到对应视图
 pub fn show_panel_with(app: &AppHandle, event: &str) {
+    set_operate_mode(app, true);
     if let Some(w) = panel(app) {
         let _ = w.show();
         let _ = w.set_focus();
@@ -81,6 +121,7 @@ pub fn hide_panel(app: &AppHandle) {
     if let Some(w) = panel(app) {
         let _ = w.hide();
     }
+    set_operate_mode(app, false);
 }
 
 pub fn show_panel(app: &AppHandle) {
@@ -134,21 +175,27 @@ pub fn apply_settings(app: &AppHandle) {
 
     if let Some(w) = widget(app) {
         if let Ok(hwnd) = w.hwnd() {
-            let layer = settings
-                .get("widgetLayer")
-                .and_then(|v| v.as_str())
-                .unwrap_or("float");
             let click_through = settings
                 .get("clickThrough")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let blur = settings.get("blur").and_then(|v| v.as_bool()).unwrap_or(true);
             let dark = settings.get("mode").and_then(|v| v.as_str()) == Some("dark");
+            let operating = panel_is_open(app);
 
-            win::set_widget_layer(hwnd, layer == "float");
-            // DWM 的亚克力对子窗口无效，小部件的磨砂走非公开接口自己加
-            win::enable_backdrop_blur(hwnd, blur, dark);
-            win::apply_widget_styles(hwnd, click_through);
+            // 操作模式下窗口是顶层窗口，别把它按回桌面层
+            // （widgetLayer = "none" 是排查用的档位：完全不挂桌面层，用来定位
+            //   「点不动」到底是桌面层导致的还是别的原因）
+            let layer_now = settings
+                .get("widgetLayer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("wallpaper");
+            if !operating && layer_now != "none" {
+                win::set_widget_layer(hwnd, widget_layer_is_float(&settings));
+            }
+            // DWM 的亚克力对子窗口无效，只有挂在桌面层时（非操作模式）才需要自己加磨砂
+            win::enable_backdrop_blur(hwnd, blur && !operating, dark);
+            win::apply_widget_styles(hwnd, click_through, operating);
         }
     }
 
@@ -484,6 +531,12 @@ pub fn run() {
             win::install_hotkey(handle.clone());
             remind::spawn(handle.clone());
 
+            // 面板不做「失焦自动收起」。
+            //
+            // 试过这个方案，但它很脆：Windows 有前台锁，set_focus 不一定真能抢到焦点，
+            // 面板可能刚显示就判定自己失焦、立刻收起——连带把刚升起来的小部件也按回桌面层，
+            // 表现就是「点了没反应」。改成完全由用户控制：
+            // 开 = 双击 Ctrl，关 = Esc 或再按一次双击 Ctrl，状态清晰可预期。
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

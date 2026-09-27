@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // 唤出面板：快速添加 + 今天/周/月三视图 + 设置。平时隐藏，双击 Ctrl 唤出。
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api, type Task, type TaskPrefill } from "../lib/api";
 import { state, todayProgress } from "../lib/store";
@@ -49,21 +48,11 @@ function onKey(e: KeyboardEvent) {
   void api.hidePanel();
 }
 
-// 面板丢掉焦点就收起（此时说明用户去点别处了）。
-// 加一道保护：只有真正获得过焦点之后才启用，避免唤出瞬间因聚焦失败被立刻收起。
-let everFocused = false;
+// 面板的收起交给 Rust 侧处理：失焦时判断焦点是否落在本进程自己的窗口上，
+// 是（用户去点小部件）就保持不动，否才收起。前端不再自己判断，避免两边打架。
 
 onMounted(async () => {
   window.addEventListener("keydown", onKey);
-
-  const win = getCurrentWindow();
-  await win.onFocusChanged(({ payload: focused }) => {
-    if (focused) {
-      everFocused = true;
-    } else if (everFocused && !editorOpen.value) {
-      void api.hidePanel();
-    }
-  });
 
   // Rust 侧唤出面板时会带上意图：直接看板 / 新建 / 设置
   await listen("panel:show", () => {
