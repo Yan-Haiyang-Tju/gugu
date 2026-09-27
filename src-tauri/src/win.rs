@@ -100,6 +100,31 @@ fn find_worker_w() -> HWND {
     }
 }
 
+// user32 的公开导出，声明链接即可（不必为此打开 Win32_System_Threading 整个模块）
+#[link(name = "user32")]
+extern "system" {
+    fn AttachThreadInput(idattach: u32, idattachto: u32, fattach: i32) -> i32;
+}
+
+/// 解除跨进程 SetParent 造成的输入队列挂接。
+///
+/// 踩到的坑：SetParent 到 explorer 的窗口时，Windows 会把本线程的输入队列和
+/// explorer 的挂在一起。后果是**桌面（Progman）为前台时，低级键盘钩子收不到按键**，
+/// 表现就是「在别的窗口双击 Ctrl 好使，回到桌面就失灵」。
+/// 挂接本身对「挂在图标下方纯展示」没有任何用处，所以挂完立刻解除。
+unsafe fn detach_input_queue(window: HWND, target: HWND) {
+    let ours = unsafe { GetWindowThreadProcessId(window, None) };
+    let theirs = unsafe { GetWindowThreadProcessId(target, None) };
+    if ours != 0 && theirs != 0 && ours != theirs {
+        unsafe {
+            // 两个方向都试一次：AttachThreadInput 是方向敏感的，
+            // 只解一个方向可能解不干净。
+            let _ = AttachThreadInput(ours, theirs, 0);
+            let _ = AttachThreadInput(theirs, ours, 0);
+        }
+    }
+}
+
 fn worker_child_of(parent: HWND) -> Option<HWND> {
     let workerw = wide("WorkerW");
     unsafe {
@@ -149,6 +174,9 @@ pub fn set_widget_layer(hwnd: HWND, above_icons: bool) -> bool {
             0,
             SET_WINDOW_POS_FLAGS(SWP_NOMOVE.0 | SWP_NOSIZE.0 | SWP_FRAMECHANGED.0),
         );
+
+        // 挂完顺手解除输入队列挂接（跨进程 SetParent 的已知副作用，解除无害）
+        detach_input_queue(hwnd, target);
 
         let ok = GetParent(hwnd).unwrap_or_default() == target;
         // 挂进桌面层后坐标相对父窗口，必须显式换算一次
@@ -405,6 +433,26 @@ fn now_ms() -> u64 {
     BASE_MS.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
 }
 
+/// 最近一次「非 Ctrl 按键」的时间。轮询通道靠它判断这记 Ctrl 是不是独立按下的，
+/// 避免 Ctrl+C / Ctrl+V 连按被误判成双击 Ctrl。
+static LAST_OTHER_KEY: AtomicU64 = AtomicU64::new(0);
+/// 触发冷却：钩子与轮询两条通道都指向同一个动作，避免同一次手势被处理两遍
+static LAST_FIRE: AtomicU64 = AtomicU64::new(0);
+
+/// 两条通道共用的触发入口（带冷却去重）。`src` 只用于日志，便于确认是哪条通道生效。
+fn fire_trigger(src: &str) {
+    let now = now_ms();
+    let last = LAST_FIRE.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < 600 {
+        return; // 同一次手势
+    }
+    LAST_FIRE.store(now, Ordering::Relaxed);
+    println!("[gugu] 热键触发（{src}）");
+    if let Some(tx) = TRIGGER_TX.get() {
+        let _ = tx.send(());
+    }
+}
+
 unsafe extern "system" fn kb_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     // code < 0 时必须原样透传；code == 0 即 HC_ACTION
     if code == 0 && ENABLED.load(Ordering::Relaxed) {
@@ -421,8 +469,11 @@ unsafe extern "system" fn kb_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
                 if is_ctrl {
                     CTRL_DOWN.store(true, Ordering::Relaxed);
                     ALONE.store(true, Ordering::Relaxed);
-                } else if CTRL_DOWN.load(Ordering::Relaxed) {
-                    ALONE.store(false, Ordering::Relaxed);
+                } else {
+                    LAST_OTHER_KEY.store(now_ms(), Ordering::Relaxed);
+                    if CTRL_DOWN.load(Ordering::Relaxed) {
+                        ALONE.store(false, Ordering::Relaxed);
+                    }
                 }
             } else if msg == WM_KEYUP || msg == WM_SYSKEYUP {
                 if is_ctrl {
@@ -434,9 +485,7 @@ unsafe extern "system" fn kb_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
                         let win = WINDOW_MS.load(Ordering::Relaxed);
                         if prev != 0 && now.saturating_sub(prev) <= win {
                             LAST_UP.store(0, Ordering::Relaxed); // 消费掉这一对，三连击不会重复触发
-                            if let Some(tx) = TRIGGER_TX.get() {
-                                let _ = tx.send(());
-                            }
+                            fire_trigger("钩子");
                         } else {
                             LAST_UP.store(now, Ordering::Relaxed);
                         }
@@ -446,6 +495,50 @@ unsafe extern "system" fn kb_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
         }
     }
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+#[link(name = "user32")]
+extern "system" {
+    fn GetAsyncKeyState(vkey: i32) -> i16;
+}
+
+/// Ctrl 状态轮询通道 —— 双击 Ctrl 的主通道。
+///
+/// 为什么不能只靠键盘钩子：钩子在某些前台状态下会被系统跳过。实测「桌面（Progman）
+/// 为前台」时收不到按键，而其它窗口都正常，表现就是「在别的窗口能用、回桌面就失灵」。
+/// 轮询不依赖钩子，也不会被系统摘除，代价只是每 25ms 一次极轻量的系统调用。
+///
+/// 防误触：只有「最近 800ms 内没按过其它键」时才认这记 Ctrl 是独立按下的，
+/// 这样 Ctrl+C / Ctrl+V 这类连按不会把面板误唤出来。
+fn spawn_ctrl_poller() {
+    std::thread::spawn(|| {
+        let mut was_down = false;
+        let mut last_up: u64 = 0;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            if !ENABLED.load(Ordering::Relaxed) {
+                continue;
+            }
+            let down = unsafe {
+                GetAsyncKeyState(VK_LCONTROL as i32) < 0
+                    || GetAsyncKeyState(VK_RCONTROL as i32) < 0
+            };
+            let now = now_ms();
+            if was_down && !down {
+                let quiet = now.saturating_sub(LAST_OTHER_KEY.load(Ordering::Relaxed)) > 800;
+                let win = WINDOW_MS.load(Ordering::Relaxed);
+                if !quiet {
+                    last_up = 0;
+                } else if last_up != 0 && now.saturating_sub(last_up) <= win {
+                    last_up = 0;
+                    fire_trigger("轮询");
+                } else {
+                    last_up = now;
+                }
+            }
+            was_down = down;
+        }
+    });
 }
 
 /// 安装低级键盘钩子，并起一个消费触发的常驻线程。
@@ -461,7 +554,6 @@ pub fn install_hotkey(app: AppHandle) {
     // 消费者：钩子回调里只做一次 send，真正的活交给主线程事件循环
     std::thread::spawn(move || {
         while rx.recv().is_ok() {
-            println!("[gugu] 热键触发");
             let handle = app.clone();
             let inner = handle.clone();
             if handle
@@ -472,6 +564,14 @@ pub fn install_hotkey(app: AppHandle) {
             }
         }
     });
+
+    spawn_ctrl_poller();
+
+    // 临时验证轮询通道：跳过钩子安装
+    if std::env::var("GUGU_SKIP_HOOK").is_ok() {
+        println!("[gugu] 调试：已跳过键盘钩子，仅使用轮询通道");
+        return;
+    }
 
     // 钩子线程：装好钩子后必须一直跑消息循环，否则回调不会被调用
     std::thread::spawn(|| unsafe {
