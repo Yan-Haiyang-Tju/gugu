@@ -102,7 +102,7 @@ const rangeLabel = computed(
             :title="`${fmtHM(fromStamp(t.dueAt)!)} ${t.title}`"
             @click="emit('edit', t)"
           >
-            <em>{{ fmtHM(fromStamp(t.dueAt)!) }}</em> {{ t.title }}
+            {{ t.title }}
           </button>
         </div>
       </div>
@@ -233,12 +233,8 @@ const rangeLabel = computed(
   filter: brightness(0.96);
 }
 
-.wk-chip em {
-  font-style: normal;
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
-
+/* 格子窄，只放标题：时间已经由纵向位置表达了，
+   完整时间放在 title 提示里（原来把时间也塞进块内，结果只剩「10:00 …」） */
 .wk-chip.fin {
   opacity: 0.55;
   text-decoration: line-through;
