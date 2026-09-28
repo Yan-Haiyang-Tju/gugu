@@ -53,7 +53,9 @@ No account. No sync. No telemetry. Your data is a SQLite file on your own disk.
 
 **Appearance**
 - Three palettes: 青瓷绿 Celadon · 天青蓝 Azure · 蜜柑橘 Tangerine
-- Light & dark, adjustable opacity, optional frosted glass
+- Light & dark
+- Independent opacity for the widget and the panel (30–100%), plus one-click presets
+- Optional frosted glass
 - Tray icon showing the next task and its countdown
 
 ## Screenshots
