@@ -85,7 +85,8 @@ fn set_operate_mode(app: &AppHandle, on: bool) {
 
     if on {
         win::detach_and_raise(hwnd);
-    } else {
+    } else if settings.get("widgetLayer").and_then(|v| v.as_str()) != Some("none") {
+        // "none" 是排查用的档位（完全不挂桌面层），退出操作模式时也要尊重它
         win::set_widget_layer(hwnd, widget_layer_is_float(&settings));
     }
     win::apply_widget_styles(hwnd, click_through, on);
