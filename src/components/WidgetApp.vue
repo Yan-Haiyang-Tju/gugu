@@ -3,7 +3,7 @@
 // 任务行点开会在面板里打开编辑窗；勾选框直接改完成状态。
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../lib/api";
 import {
   dayProgress,
@@ -31,6 +31,19 @@ const focusDate = ref(new Date(state.now));
 /** 按了双击 Ctrl、小部件被升到顶层时才为 true —— 只有这时它才收得到鼠标 */
 const operating = ref(false);
 
+/**
+ * Esc 收起。
+ *
+ * 面板里也有一份同样的处理，但两个窗口的焦点是互斥的：用户点了小部件（拖动、
+ * 勾任务）之后焦点在小部件上，面板收不到按键——只在面板上挂 Esc 的话，
+ * 从操作模式退不出来。
+ */
+function onKey(e: KeyboardEvent) {
+  if (e.key === "Escape" && operating.value) {
+    void api.hidePanel();
+  }
+}
+
 onMounted(async () => {
   // 主动问一次当前状态：页面重载会丢掉事件期间设过的标志
   try {
@@ -41,7 +54,10 @@ onMounted(async () => {
   await listen<string>("widget:mode", (e) => {
     operating.value = e.payload === "operate";
   });
+  window.addEventListener("keydown", onKey);
 });
+
+onUnmounted(() => window.removeEventListener("keydown", onKey));
 
 const monthLabel = computed(
   () => `${view.value.getFullYear()}年${view.value.getMonth() + 1}月`,
