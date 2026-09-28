@@ -428,8 +428,8 @@ function rowEl(t){
       <span class="t-title">${t.title}</span>
       <span class="tagpill" style="--tc:${TAGS[t.tag].c}">${TAGS[t.tag].l}</span>
       ${t.remind?BELL:""}
-      <span class="pill-over">咕咕咕</span><span class="pill-gu">咕 → 明天</span>
-      <span class="t-act"><button class="mini-btn" data-act="gu">咕了</button><button class="mini-btn ok" data-act="done">完成</button></span>
+      <span class="pill-over">已逾期</span><span class="pill-gu">已顺延</span>
+      <span class="t-act"><button class="mini-btn" data-act="gu">推到明天</button><button class="mini-btn ok" data-act="done">完成</button></span>
       <span class="ck${t.done?" on":""}"><svg viewBox="0 0 12 10"><path d="M1 5.2 4.2 8.4 11 1.6"/></svg></span>
     </div>`;
   return r;
@@ -480,7 +480,7 @@ function renderWidgetList(){
     const d=document.createElement("div");
     d.className="w-row"+(isOver(t)?" overdue":"");
     d.innerHTML=`<span class="w-time">${pad(t.h)}:${pad(t.m)}</span><span class="w-title">${t.title}</span>
-      ${isOver(t)?'<span class="w-gu">咕咕咕</span>':""}
+      ${isOver(t)?'<span class="w-gu">已逾期</span>':""}
       <span class="ck sm"><svg viewBox="0 0 12 10"><path d="M1 5.2 4.2 8.4 11 1.6"/></svg></span>`;
     d.querySelector(".ck").addEventListener("click",()=>{t.done=true;refreshRow(t.id);refreshCounts();});
     list.appendChild(d);
@@ -493,8 +493,8 @@ function renderWidgetList(){
 function refreshCounts(){
   const done=TASKS.filter(t=>t.done).length, g=TASKS.filter(t=>t.gugu&&!t.done).length, n=TASKS.length;
   $("#wCount").textContent=`${done}/${n}`;
-  $("#wFoot").textContent= done===n ? "都完成啦，今天很老实 ✓" : `还有 ${n-done} 个待办 · 咕了 ${g} 个`;
-  $("#pFootL").textContent= done===n ? "全部老实了 ✓" : `今天 ${done}/${n} · 咕了 ${g} 个`;
+  $("#wFoot").textContent= done===n ? "都完成啦，今天很老实 ✓" : `还有 ${n-done} 个待办 · 逾期 ${g} 个`;
+  $("#pFootL").textContent= done===n ? "全部老实了 ✓" : `今天 ${done}/${n} · 逾期 ${g} 个`;
   renderWidgetList();
 }
 

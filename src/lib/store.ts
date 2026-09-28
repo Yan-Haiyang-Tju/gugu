@@ -77,7 +77,7 @@ export async function removeTask(id: number) {
   await refreshTasks();
 }
 
-/** 「咕了」：把任务顺延一天 */
+/** 把任务顺延一天（界面上的「推到明天」） */
 export async function postpone(task: Task) {
   const due = fromStamp(task.dueAt);
   if (!due) return;

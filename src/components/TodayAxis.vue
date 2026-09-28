@@ -72,9 +72,9 @@ const timed = computed(() => rows.value.filter((t) => t.dueAt));
           <span class="tagpill" :style="{ '--tc': categoryOf(t.category).color }">
             {{ categoryOf(t.category).label }}
           </span>
-          <span v-if="isOverdue(t)" class="pill-over">咕咕咕</span>
+          <span v-if="isOverdue(t)" class="pill-over">已逾期</span>
           <span class="act">
-            <button class="mini-btn" @click.stop="postpone(t)">咕了</button>
+            <button class="mini-btn" title="顺延到明天" @click.stop="postpone(t)">推到明天</button>
             <button class="mini-btn ok" @click.stop="toggleDone(t, true)">完成</button>
           </span>
           <button class="ck" :class="{ on: t.done }" @click.stop="toggleDone(t)">

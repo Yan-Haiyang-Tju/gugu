@@ -22,10 +22,10 @@ const cat = computed(() => categoryOf(props.task.category));
     <span class="time">{{ due ? fmtHM(due) : "--:--" }}</span>
     <span class="title">{{ task.title }}</span>
     <span v-if="task.priority" class="pri" title="重要">!</span>
-    <span v-if="overdue" class="pill-over">咕咕咕</span>
+    <span v-if="overdue" class="pill-over">已逾期</span>
     <span v-else class="tagpill" :style="{ '--tc': cat.color }">{{ cat.label }}</span>
     <span class="act">
-      <button class="mini-btn" @click.stop="postpone(task)">咕了</button>
+      <button class="mini-btn" title="顺延到明天" @click.stop="postpone(task)">推到明天</button>
       <button class="mini-btn ok" @click.stop="toggleDone(task, true)">完成</button>
     </span>
     <button

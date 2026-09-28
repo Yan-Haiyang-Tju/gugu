@@ -83,7 +83,7 @@ const selectedTitle = computed(() => humanDay(selected.value));
         >
           <b>{{ fmtHM(fromStamp(t.dueAt)!) }}</b>
           <span class="mo-title">{{ t.title }}</span>
-          <span v-if="isOverdue(t)" class="pill-over">咕咕咕</span>
+          <span v-if="isOverdue(t)" class="pill-over">已逾期</span>
           <i :style="{ '--tc': categoryOf(t.category).color }">
             {{ categoryOf(t.category).label }}
           </i>
