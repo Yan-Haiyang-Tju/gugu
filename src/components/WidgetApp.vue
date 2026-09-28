@@ -55,6 +55,15 @@ onMounted(async () => {
     operating.value = e.payload === "operate";
   });
   window.addEventListener("keydown", onKey);
+
+  // 尺寸/位置变化后记住新值。
+  // 注意不能用 startResizeDragging 的返回值来存：它内部是 PostMessage，调用立刻返回，
+  // 那时窗口还没开始变，存下来的是旧尺寸。所以统一靠 onResized 事件。
+  let saveTimer: number | undefined;
+  await getCurrentWindow().onResized(() => {
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => void api.saveWidgetPos(), 400);
+  });
 });
 
 onUnmounted(() => window.removeEventListener("keydown", onKey));
@@ -136,6 +145,14 @@ async function startDrag(e: PointerEvent) {
   // 移动循环结束后才返回，此时把新位置记下来
   void api.saveWidgetPos();
 }
+
+/** 右下角抓手：拖动改变窗口大小（同样只在操作模式下可用） */
+async function startResize(e: PointerEvent) {
+  if (e.button !== 0 || !operating.value) return;
+  e.preventDefault();
+  await getCurrentWindow().startResizeDragging("SouthEast");
+  void api.saveWidgetPos(); // 尺寸一并记下来，下次启动沿用
+}
 </script>
 
 <template>
@@ -207,9 +224,12 @@ async function startDrag(e: PointerEvent) {
 
     <div class="w-foot">
       <button class="w-add" title="新建任务" @click="api.showPanelAdd()">＋ 新建</button>
-      <span class="w-tip">{{ operating ? "可拖动 · Esc 收起" : footText }}</span>
+      <span class="w-tip">{{ operating ? "可拖动 / 右下角缩放 · Esc 收起" : footText }}</span>
       <button class="ghost" title="设置" @click="api.showPanelSettings()">⚙</button>
     </div>
+
+    <!-- 缩放抓手：只在操作模式出现，提示「这里可以拉」 -->
+    <span v-if="operating" class="w-resize" title="拖动改变大小" @pointerdown="startResize" />
   </div>
 </template>
 
@@ -217,6 +237,36 @@ async function startDrag(e: PointerEvent) {
 .widget {
   padding: 16px 16px 10px;
   gap: 0;
+}
+
+/* 右下角缩放手柄：只在操作模式出现 */
+.w-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  z-index: 5;
+}
+
+.w-resize::before {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--text-3);
+  border-bottom: 2px solid var(--text-3);
+  border-bottom-right-radius: 3px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+.w-resize:hover::before {
+  opacity: 1;
+  border-color: var(--accent);
 }
 
 /* 操作模式（按了双击 Ctrl、已升到顶层）时给一圈强调色描边，

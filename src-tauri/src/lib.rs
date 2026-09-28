@@ -288,7 +288,7 @@ pub fn apply_settings(app: &AppHandle) {
     tray::refresh_menu(app);
 }
 
-/// 启动时决定小部件位置：优先用记忆的位置，落到屏幕外则回到右上角
+/// 启动时决定小部件的位置与尺寸：优先用记忆的，落到屏幕外则回到右上角
 fn restore_widget_position(app: &AppHandle) {
     let Some(w) = widget(app) else { return };
     let settings = app.state::<Store>().settings();
@@ -296,6 +296,12 @@ fn restore_widget_position(app: &AppHandle) {
     let y = settings.get("widgetY").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
     let cw = settings.get("widgetW").and_then(|v| v.as_i64()).unwrap_or(300) as i32;
     let ch = settings.get("widgetH").and_then(|v| v.as_i64()).unwrap_or(560) as i32;
+
+    // 恢复用户拖动过的尺寸（存的是物理像素）。夹一下范围，
+    // 免得历史值异常或换了显示器之后窗口大到没法用。
+    if (200..=1400).contains(&cw) && (300..=1600).contains(&ch) {
+        let _ = w.set_size(tauri::PhysicalSize::new(cw as u32, ch as u32));
+    }
 
     let on_screen = x >= 0
         && y >= 0
