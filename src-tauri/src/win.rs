@@ -426,7 +426,6 @@ static HOOK: AtomicIsize = AtomicIsize::new(0);
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static WINDOW_MS: AtomicU64 = AtomicU64::new(420);
 /// 上一次「独立 Ctrl」抬起的时间；0 表示暂无基准
-static LAST_UP: AtomicU64 = AtomicU64::new(0);
 static CTRL_DOWN: AtomicBool = AtomicBool::new(false);
 /// 本次 Ctrl 按下期间有没有夹带其它按键（有则不算独立按下，避免 Ctrl+C 误触）
 static ALONE: AtomicBool = AtomicBool::new(true);
@@ -438,18 +437,24 @@ fn now_ms() -> u64 {
     BASE_MS.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
 }
 
+/// 钩子通道自己的「上一次独立 Ctrl 抬起」时间（轮询通道另有一份本地状态）
+static LAST_UP: AtomicU64 = AtomicU64::new(0);
 /// 最近一次「非 Ctrl 按键」的时间。轮询通道靠它判断这记 Ctrl 是不是独立按下的，
 /// 避免 Ctrl+C / Ctrl+V 连按被误判成双击 Ctrl。
 static LAST_OTHER_KEY: AtomicU64 = AtomicU64::new(0);
-/// 触发冷却：钩子与轮询两条通道都指向同一个动作，避免同一次手势被处理两遍
+/// 触发冷却：只用来吸收两条通道之间几十毫秒的重复触发。
+///
+/// **不能设大**。设成 600ms 时，用户「唤出后立刻再按一次收起来」这种正常操作
+/// 会被整个吞掉，表现就是「偶尔按了没反应」。两条通道对同一次手势的触发
+/// 相隔只有几十毫秒，250ms 足够去重。
 static LAST_FIRE: AtomicU64 = AtomicU64::new(0);
+const FIRE_COOLDOWN_MS: u64 = 250;
 
-/// 两条通道共用的触发入口（带冷却去重）。`src` 只用于日志，便于确认是哪条通道生效。
+/// 两条通道共用的触发入口。`src` 只用于日志，便于确认是哪条通道生效。
 fn fire_trigger(src: &str) {
     let now = now_ms();
-    let last = LAST_FIRE.load(Ordering::Relaxed);
-    if now.saturating_sub(last) < 600 {
-        return; // 同一次手势
+    if now.saturating_sub(LAST_FIRE.load(Ordering::Relaxed)) < FIRE_COOLDOWN_MS {
+        return; // 同一次手势，另一条通道已经处理过了
     }
     LAST_FIRE.store(now, Ordering::Relaxed);
     println!("[gugu] 热键触发（{src}）");
@@ -462,6 +467,8 @@ unsafe extern "system" fn kb_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
     // code < 0 时必须原样透传；code == 0 即 HC_ACTION
     if code == 0 && ENABLED.load(Ordering::Relaxed) {
         let kb = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
+        // 钩子回调里绝不能做 I/O：打印会拖慢回调，超过系统的 ~300ms 上限后
+        // 钩子会被静默摘除。诊断时踩过这个坑——加了日志反而丢事件。
         let injected = kb.flags.0 & LLKHF_INJECTED.0 != 0;
         // 发布版忽略合成按键，避免被其它程序的模拟输入误触；
         // 调试版放行，这样自动化脚本才能验证整条热键链路。
@@ -474,7 +481,10 @@ unsafe extern "system" fn kb_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
                 if is_ctrl {
                     CTRL_DOWN.store(true, Ordering::Relaxed);
                     ALONE.store(true, Ordering::Relaxed);
-                } else {
+                } else if vk != 0 {
+                    // vk == 0 是无效按键：某些键盘驱动、输入法、以及带合成输入的
+                    // 程序都会发出这种噪声事件。把它当成「用户按了别的键」会让
+                    // 轮询通道在随后一段时间内拒绝工作，表现就是「偶尔按了没反应」。
                     LAST_OTHER_KEY.store(now_ms(), Ordering::Relaxed);
                     if CTRL_DOWN.load(Ordering::Relaxed) {
                         ALONE.store(false, Ordering::Relaxed);
@@ -485,11 +495,15 @@ unsafe extern "system" fn kb_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> 
                     let alone = ALONE.swap(false, Ordering::Relaxed);
                     CTRL_DOWN.store(false, Ordering::Relaxed);
                     if alone {
+                        // 每条通道各自记录「上一次独立 Ctrl 抬起」。
+                        // 不要共享：两条通道采样率不同（钩子是即时的、轮询 25ms 一次），
+                        // 共享会让它们互相打乱节奏，反而漏掉或重复触发。
                         let now = now_ms();
                         let prev = LAST_UP.load(Ordering::Relaxed);
-                        let win = WINDOW_MS.load(Ordering::Relaxed);
-                        if prev != 0 && now.saturating_sub(prev) <= win {
-                            LAST_UP.store(0, Ordering::Relaxed); // 消费掉这一对，三连击不会重复触发
+                        if prev != 0
+                            && now.saturating_sub(prev) <= WINDOW_MS.load(Ordering::Relaxed)
+                        {
+                            LAST_UP.store(0, Ordering::Relaxed);
                             fire_trigger("钩子");
                         } else {
                             LAST_UP.store(now, Ordering::Relaxed);
@@ -528,11 +542,19 @@ fn spawn_ctrl_poller() {
                 GetAsyncKeyState(VK_LCONTROL as i32) < 0
                     || GetAsyncKeyState(VK_RCONTROL as i32) < 0
             };
-            let now = now_ms();
             if was_down && !down {
-                let quiet = now.saturating_sub(LAST_OTHER_KEY.load(Ordering::Relaxed)) > 800;
+                let now = now_ms();
+                // 500ms 足够把 Ctrl+C 这类组合排除掉（其它键紧随 Ctrl 之后按下），
+                // 又不至于让一次无关按键把热键"封口"太久。
+                //
+                // 注意 last_other == 0 要单独放行：0 表示「本次运行还没按过其它键」，
+                // 若直接参与相减会得到「现在距开机多少毫秒」，应用刚启动的那几百毫秒内
+                // 会恒小于 500ms，把轮询通道自己锁死。
+                let last_other = LAST_OTHER_KEY.load(Ordering::Relaxed);
+                let quiet = last_other == 0 || now.saturating_sub(last_other) > 500;
                 let win = WINDOW_MS.load(Ordering::Relaxed);
                 if !quiet {
+                    // 这记 Ctrl 夹带了别的键（Ctrl+C 之类），不算独立按下
                     last_up = 0;
                 } else if last_up != 0 && now.saturating_sub(last_up) <= win {
                     last_up = 0;
