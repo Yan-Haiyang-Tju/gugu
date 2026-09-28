@@ -25,7 +25,13 @@ export function applyTheme(s: Settings) {
   root.dataset.theme = s.theme;
   root.dataset.mode = s.mode;
   root.dataset.blur = s.blur && systemBlur ? "on" : "off";
-  root.style.setProperty("--glass-alpha", String(s.glassAlpha));
+  // 面板和小部件各有一个透明度滑块：面板背后有系统磨砂兜底，小部件没有
+  // （它是 explorer 的子窗口，DWM 效果不生效），两者能接受的通透程度差很多。
+  const isWidget = root.dataset.win === "widget";
+  root.style.setProperty(
+    "--win-alpha",
+    String(isWidget ? s.widgetAlpha : s.glassAlpha),
+  );
   root.classList.toggle("no-blur", !s.blur);
 }
 

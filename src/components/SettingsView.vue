@@ -16,6 +16,40 @@ const THEMES: { key: ThemeName; label: string; color: string }[] = [
   { key: "tangerine", label: "蜜柑橘", color: "#E8956D" },
 ];
 
+/** 一键风格：透明度与磨砂的组合，省得逐项去调 */
+type Preset = {
+  label: string;
+  hint: string;
+  patch: { widgetAlpha: number; glassAlpha: number; blur: boolean };
+};
+const PRESETS: Preset[] = [
+  {
+    label: "实心",
+    hint: "不透明，任何壁纸上都最清晰",
+    patch: { widgetAlpha: 1, glassAlpha: 0.98, blur: false },
+  },
+  {
+    label: "磨砂",
+    hint: "默认：面板走系统磨砂，小部件接近实心",
+    patch: { widgetAlpha: 0.96, glassAlpha: 0.82, blur: true },
+  },
+  {
+    label: "通透",
+    hint: "明显能看见壁纸。壁纸越花，字越难读——滑块还能继续往低调",
+    patch: { widgetAlpha: 0.7, glassAlpha: 0.6, blur: true },
+  },
+];
+
+function isPreset(p: Preset): boolean {
+  const t = 0.02;
+  return (
+    !!s.value &&
+    Math.abs(s.value.widgetAlpha - p.patch.widgetAlpha) < t &&
+    Math.abs(s.value.glassAlpha - p.patch.glassAlpha) < t &&
+    s.value.blur === p.patch.blur
+  );
+}
+
 onMounted(async () => {
   autostart.value = await api.getAutostart();
   dataPath.value = await api.dataDir();
@@ -66,11 +100,39 @@ async function doExport() {
         </div>
       </div>
       <div class="row">
-        <label>透明度</label>
+        <label>风格</label>
+        <div class="themes">
+          <button
+            v-for="p in PRESETS"
+            :key="p.label"
+            class="theme"
+            :class="{ on: isPreset(p) }"
+            :title="p.hint"
+            @click="patchSettings(p.patch)"
+          >
+            {{ p.label }}
+          </button>
+        </div>
+      </div>
+      <div class="row">
+        <label>小部件</label>
         <input
           type="range"
-          min="0.5"
-          max="0.95"
+          min="0.3"
+          max="1"
+          step="0.01"
+          :value="s.widgetAlpha"
+          @input="patchSettings({ widgetAlpha: Number(($event.target as HTMLInputElement).value) })"
+        />
+        <b class="val">{{ Math.round(s.widgetAlpha * 100) }}%</b>
+        <span class="tip">越透越能看到壁纸，字也越难读</span>
+      </div>
+      <div class="row">
+        <label>面板</label>
+        <input
+          type="range"
+          min="0.3"
+          max="1"
           step="0.01"
           :value="s.glassAlpha"
           @input="patchSettings({ glassAlpha: Number(($event.target as HTMLInputElement).value) })"
@@ -84,7 +146,7 @@ async function doExport() {
           :checked="s.blur"
           @change="patchSettings({ blur: ($event.target as HTMLInputElement).checked })"
         />
-        <span class="tip">开启后小部件走系统磨砂（能透出模糊的桌面）；关掉是干净实心卡片，文字更清晰</span>
+        <span class="tip">开启后用系统磨砂做背景（面板一定生效，小部件取决于系统支不支持）；关掉则只用底色</span>
       </div>
     </section>
 

@@ -57,7 +57,10 @@ export interface TaskPrefill {
 export interface Settings {
   theme: ThemeName;
   mode: "light" | "dark";
+  /** 面板透明度（背后有系统磨砂兜底） */
   glassAlpha: number;
+  /** 小部件透明度（背后没有磨砂，壁纸会直接透上来） */
+  widgetAlpha: number;
   blur: boolean;
   widgetVisible: boolean;
   /** float = 浮在桌面图标之上（可点击可拖动）；wallpaper = 沉到图标之下（纯展示） */

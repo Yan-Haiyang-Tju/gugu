@@ -37,7 +37,8 @@ pub fn default_settings() -> serde_json::Value {
     json!({
         "theme": "celadon",       // celadon 青瓷绿 | azure 天青蓝 | tangerine 蜜柑橘
         "mode": "light",          // light | dark
-        "glassAlpha": 0.82,       // 玻璃面板透明度 0.50–0.95
+        "glassAlpha": 0.82,       // 面板透明度 0.30–1.00
+        "widgetAlpha": 0.96,      // 小部件透明度 0.30–1.00（背后没有磨砂，默认偏实）
         "blur": true,             // 毛玻璃
         "widgetVisible": true,
         // 平时小部件待在桌面哪一层（两种都是纯展示，交互一律走快捷键升到顶层）：
